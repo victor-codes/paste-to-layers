@@ -1,4 +1,4 @@
-import type { Gradient, IRNode, NormalizedStyle, RGBA, Sizing } from './types';
+import type { Gradient, GridTrack, IRNode, NormalizedStyle, RGBA, Sizing } from './types';
 
 /** Warnings collected during the most recent render() call (array is cleared at the start of each call). */
 export const renderWarnings: string[] = [];
@@ -162,6 +162,25 @@ function solid(c: RGBA): SolidPaint {
   return { type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a };
 }
 
+const imageCache = new Map<string, Promise<string | null>>();
+
+/** Image fill for a URL (cached per render); null when it can't be fetched or decoded. */
+async function imagePaint(url: string, name: string): Promise<ImagePaint | null> {
+  let hash = imageCache.get(url);
+  if (!hash) {
+    hash = figma.createImageAsync(url).then((img) => img.hash, () => null);
+    imageCache.set(url, hash);
+  }
+  const h = await hash;
+  if (!h) {
+    renderWarnings.push('Image for "' + name + '" could not be loaded (' + url + '); used a placeholder.');
+    return null;
+  }
+  return { type: 'IMAGE', imageHash: h, scaleMode: 'FILL' };
+}
+
+const PLACEHOLDER: RGBA = { r: 0xe5 / 255, g: 0xe7 / 255, b: 0xeb / 255, a: 1 };
+
 /** CSS linear-gradient → Figma paint. The gradient line follows CSS: through the centre, long enough to reach the corners. */
 function linearGradient(g: Gradient, w: number, h: number): GradientPaint {
   const rad = (g.angle * Math.PI) / 180;
@@ -259,6 +278,7 @@ interface ParentCtx {
   // Whether the frame's size on each axis is known up front (fixed, or filled from a known size).
   definiteW: boolean;
   definiteH: boolean;
+  grid?: Map<IRNode, GridCell>; // cells of in-flow children when the frame is a grid
 }
 
 /**
@@ -268,6 +288,8 @@ interface ParentCtx {
  */
 function crossStretch(parent: ParentCtx, s: NormalizedStyle): { h: boolean; v: boolean } {
   const p = parent.style;
+  // Grid items stretch over their cell unless sized or aligned.
+  if (p.display === 'grid') return { h: true, v: s.alignSelf === undefined };
   const column = p.direction === 'column';
   if (p.align === 'stretch') return { h: column, v: !column && p.display !== 'block' };
   if (p.align !== undefined) return { h: false, v: false };
@@ -308,19 +330,21 @@ function setSizing(
   const st = inAuto ? crossStretch(parent!, s) : { h: false, v: false };
   const stretchH = st.h && h !== 'FIXED';
   const stretchV = st.v && v !== 'FIXED';
-  if (stretchH || stretchV) safe(() => { node.layoutAlign = 'STRETCH'; });
+  if ((stretchH || stretchV) && parent!.style.display !== 'grid') safe(() => { node.layoutAlign = 'STRETCH'; });
   safe(() => { node.layoutSizingHorizontal = stretchH ? 'FILL' : h; });
   safe(() => { node.layoutSizingVertical = stretchV ? 'FILL' : v; });
   return { h: stretchH ? 'FILL' : h, v: stretchV ? 'FILL' : v };
 }
 
 async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | null> {
-  const s = ir.style;
-  if (s.display === 'none') return null;
-  const absolute = !!parent && s.position === 'absolute';
+  if (ir.style.display === 'none') return null;
+  const absolute = !!parent && ir.style.position === 'absolute';
+  const s = absolute ? stretchAbsolute(ir.style, parent!) : ir.style;
 
   let node: SceneNode;
   let sizing: { h: Sizing; v: Sizing } = { h: 'HUG', v: 'HUG' };
+  let image: ImagePaint | null = null;
+  let grid: Map<IRNode, GridCell> | undefined;
 
   if (ir.kind === 'frame') {
     const f = figma.createFrame();
@@ -328,6 +352,9 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
     count++;
     f.name = ir.name;
     f.fills = s.background ? [solid(s.background)] : [];
+    if (s.imageUrl) image = await imagePaint(s.imageUrl, ir.name);
+    if (image) f.fills = [...f.fills, image];
+    else if (s.imageUrl) f.fills = [...f.fills, solid(PLACEHOLDER)];
     f.clipsContent = s.overflowHidden ?? false;
     f.layoutMode = s.direction === 'row' ? 'HORIZONTAL' : 'VERTICAL';
     if (s.justify === 'between') {
@@ -349,6 +376,7 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
       f.layoutWrap = 'WRAP';
       safe(() => { f.counterAxisSpacing = s.gap ?? 0; });
     }
+    if (ir.kind === 'frame' && s.display === 'grid') grid = setupGrid(f, s, ir.children);
     applyBox(f, s);
   } else if (ir.kind === 'text') {
     const t = figma.createText();
@@ -375,7 +403,8 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
     count++;
     r.name = ir.name;
     r.resize(s.width ?? 120, s.height ?? 80);
-    r.fills = [solid({ r: 0xe5 / 255, g: 0xe7 / 255, b: 0xeb / 255, a: 1 })];
+    if (s.imageUrl) image = await imagePaint(s.imageUrl, ir.name);
+    r.fills = [image ?? solid(PLACEHOLDER)];
     applyBox(r, s);
   } else {
     let created: SceneNode | null = null;
@@ -398,7 +427,11 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
     if ('opacity' in node && s.opacity !== undefined) (node as BlendMixin).opacity = s.opacity;
   }
 
-  if (parent) parent.frame.appendChild(node);
+  if (parent) appendTo(parent, node, parent.grid?.get(ir));
+  if (parent?.grid && s.alignSelf) {
+    const v = s.alignSelf === 'center' ? 'CENTER' : s.alignSelf === 'end' ? 'MAX' : 'MIN';
+    safe(() => { (node as SceneNode & GridChildrenMixin).gridChildVerticalAlign = v; });
+  }
 
   if (absolute) {
     safe(() => { (node as FrameNode).layoutPositioning = 'ABSOLUTE'; });
@@ -448,6 +481,8 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
     const f = node as FrameNode;
     if (s.minWidth !== undefined) safe(() => { f.minWidth = s.minWidth!; });
     if (s.maxWidth !== undefined) safe(() => { f.maxWidth = s.maxWidth!; });
+    if (s.minHeight !== undefined) safe(() => { f.minHeight = s.minHeight!; });
+    if (grid) sizeTracks(f, s, sizing);
   } else {
     setSizing(node as FrameNode, s, parent, absolute, { h: 'FIXED', v: 'FIXED' });
   }
@@ -461,6 +496,7 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
       style: s,
       definiteW: definite(sizing.h, parent?.definiteW),
       definiteH: definite(sizing.v, parent?.definiteH),
+      grid,
     };
     const f = node as FrameNode;
     const placed: [SceneNode, NormalizedStyle][] = [];
@@ -476,12 +512,148 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
   // Both need the final size, so they run once children have been laid out.
   if (s.gradient && (ir.kind === 'frame' || ir.kind === 'image')) {
     const f = node as FrameNode | RectangleNode;
-    const base = s.background ? [solid(s.background)] : [];
+    const base: Paint[] = ir.kind === 'frame' && s.background ? [solid(s.background)] : [];
+    if (image) base.push(image);
     f.fills = [...base, linearGradient(s.gradient, f.width, f.height)];
+  }
+  if (ir.kind === 'text' && s.textGradient) {
+    const t = node as TextNode;
+    t.fills = [linearGradient(s.textGradient, t.width, t.height)];
   }
   if (!absolute) applyRotation(node, s, false);
 
   return node;
+}
+
+/**
+ * An absolute box with both insets on an axis and no size spans between them (`inset-x-0`,
+ * `left-12 right-12`). Only resolved when the parent's size is known.
+ */
+function stretchAbsolute(s: NormalizedStyle, parent: ParentCtx): NormalizedStyle {
+  const pct = s.insetPct || {};
+  const out = { ...s };
+  const span = (a: number | undefined, b: number | undefined, pa = 0, pb = 0, size: number) =>
+    a !== undefined && b !== undefined ? size * (1 - pa - pb) - a - b : undefined;
+  if (s.width === undefined && s.widthSizing !== 'HUG' && parent.definiteW) {
+    let w = span(s.left, s.right, pct.left, pct.right, parent.frame.width);
+    if (w !== undefined && s.maxWidth !== undefined) w = Math.min(w, s.maxWidth);
+    if (w !== undefined) { out.width = Math.max(0, w); out.widthSizing = 'FIXED'; }
+  }
+  if (s.height === undefined && s.heightSizing !== 'HUG' && parent.definiteH) {
+    const h = span(s.top, s.bottom, pct.top, pct.bottom, parent.frame.height);
+    if (h !== undefined) { out.height = Math.max(0, h); out.heightSizing = 'FIXED'; }
+  }
+  return out;
+}
+
+/** 0-based grid cell of an item; spans are clamped to the column count. */
+export interface GridCell { row: number; col: number; rowSpan: number; colSpan: number }
+
+/**
+ * CSS grid auto-placement, simplified: items with an explicit row and column go first, the rest
+ * flow row by row from a cursor (sparse packing), honouring an explicit column if there is one.
+ */
+export function placeGridItems(items: NormalizedStyle['gridItem'][], cols: number): { cells: GridCell[]; rows: number } {
+  const taken = new Set<string>();
+  const fits = (r: number, c: number, rs: number, cs: number) => {
+    if (c + cs > cols) return false;
+    for (let i = r; i < r + rs; i++) for (let j = c; j < c + cs; j++) if (taken.has(i + ',' + j)) return false;
+    return true;
+  };
+  const take = (cell: GridCell) => {
+    for (let i = cell.row; i < cell.row + cell.rowSpan; i++)
+      for (let j = cell.col; j < cell.col + cell.colSpan; j++) taken.add(i + ',' + j);
+  };
+  const spans = items.map((it) => {
+    const col = it?.colStart !== undefined ? Math.min(Math.max(1, it.colStart), cols) - 1 : undefined;
+    const cs = it?.colSpan === -1 ? cols - (col ?? 0) : Math.max(1, it?.colSpan ?? 1);
+    return { col, row: it?.rowStart !== undefined ? Math.max(1, it.rowStart) - 1 : undefined,
+      colSpan: Math.min(cs, cols - (col ?? 0)), rowSpan: Math.max(1, it?.rowSpan === -1 ? 1 : it?.rowSpan ?? 1) };
+  });
+  const cells: (GridCell | undefined)[] = items.map(() => undefined);
+  spans.forEach((sp, i) => {
+    if (sp.col === undefined || sp.row === undefined) return;
+    cells[i] = { row: sp.row, col: sp.col, rowSpan: sp.rowSpan, colSpan: sp.colSpan };
+    take(cells[i]!);
+  });
+  let curR = 0;
+  let curC = 0;
+  spans.forEach((sp, i) => {
+    if (cells[i]) return;
+    let cell: GridCell;
+    if (sp.row !== undefined) {
+      let c = 0;
+      while (!fits(sp.row, c, sp.rowSpan, sp.colSpan) && c + sp.colSpan < cols) c++;
+      cell = { row: sp.row, col: c, rowSpan: sp.rowSpan, colSpan: sp.colSpan };
+    } else if (sp.col !== undefined) {
+      if (sp.col < curC) curR++;
+      while (!fits(curR, sp.col, sp.rowSpan, sp.colSpan)) curR++;
+      cell = { row: curR, col: sp.col, rowSpan: sp.rowSpan, colSpan: sp.colSpan };
+      curC = sp.col + sp.colSpan;
+    } else {
+      for (;;) {
+        if (curC + sp.colSpan > cols) { curR++; curC = 0; }
+        if (fits(curR, curC, sp.rowSpan, sp.colSpan)) break;
+        curC++;
+      }
+      cell = { row: curR, col: curC, rowSpan: sp.rowSpan, colSpan: sp.colSpan };
+      curC += sp.colSpan;
+    }
+    cells[i] = cell;
+    take(cell);
+  });
+  const rows = Math.max(1, ...cells.map((c) => c!.row + c!.rowSpan));
+  return { cells: cells as GridCell[], rows };
+}
+
+/** Switch a frame to Figma's grid layout and work out where each in-flow child goes. */
+function setupGrid(f: FrameNode, s: NormalizedStyle, children: IRNode[]): Map<IRNode, GridCell> | undefined {
+  const g = s.grid!;
+  const cols = Math.max(1, g.cols.length);
+  const inFlow = children.filter((c) => c.style.position !== 'absolute' && c.style.display !== 'none');
+  const { cells, rows } = placeGridItems(inFlow.map((c) => c.style.gridItem), cols);
+  try {
+    f.layoutMode = 'GRID';
+    f.gridColumnCount = cols;
+    f.gridRowCount = Math.max(rows, g.rows.length);
+    f.gridColumnGap = g.colGap ?? s.gap ?? 0;
+    f.gridRowGap = g.rowGap ?? s.gap ?? 0;
+  } catch (e) {
+    renderWarnings.push('"' + f.name + '" uses CSS grid, which this version of Figma can\'t create; laid out as a wrapping row.');
+    f.layoutMode = 'HORIZONTAL';
+    f.layoutWrap = 'WRAP';
+    return undefined;
+  }
+  return new Map(inFlow.map((c, i) => [c, cells[i]]));
+}
+
+/** Track sizes; `fr` tracks can't be used on an axis that hugs its content, so those hug too. */
+function sizeTracks(f: FrameNode, s: NormalizedStyle, sizing: { h: Sizing; v: Sizing }): void {
+  const apply = (sizes: GridTrackSize[], tracks: GridTrack[], hug: boolean) => {
+    sizes.forEach((size, i) => safe(() => {
+      const t: GridTrack = tracks[i] ?? 'auto';
+      if (t !== 'auto' && 'px' in t) { size.type = 'FIXED'; size.value = t.px; }
+      else if (t !== 'auto' && !hug) { size.type = 'FLEX'; size.value = t.fr; }
+      else size.type = 'HUG';
+    }));
+  };
+  apply(f.gridColumnSizes, s.grid!.cols, sizing.h === 'HUG');
+  // Rows without a template size to their content, like CSS's implicit `auto` rows.
+  apply(f.gridRowSizes, s.grid!.rows, true);
+}
+
+function appendTo(parent: ParentCtx, node: SceneNode, cell: GridCell | undefined): void {
+  if (!cell) { parent.frame.appendChild(node); return; }
+  try {
+    parent.frame.appendChildAt(node, cell.row, cell.col);
+  } catch (e) {
+    parent.frame.appendChild(node);
+    renderWarnings.push('Could not place "' + node.name + '" in its grid cell; it was added to the next free one.');
+    return;
+  }
+  const item = node as SceneNode & GridChildrenMixin;
+  safe(() => { if (cell.colSpan > 1) item.gridColumnSpan = cell.colSpan; });
+  safe(() => { if (cell.rowSpan > 1) item.gridRowSpan = cell.rowSpan; });
 }
 
 /** CSS absolute position (left/top/right/bottom, % insets, translate) → x/y, then rotation. */

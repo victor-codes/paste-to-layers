@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { closestStyle, fitExtent, parseStyleName } from './render';
+import { closestStyle, fitExtent, parseStyleName, placeGridItems } from './render';
 
 describe('font style names', () => {
   it('reads weights regardless of spacing', () => {
@@ -36,5 +36,28 @@ describe('sizing a root from absolute children', () => {
   it('keeps an off-centre child inside', () => {
     // left: calc(50% - 7.5px), translate -50%, 383 wide: both edges must stay in the parent.
     expect(fitExtent(-7.5, 0.5, 0, -0.5, 383)).toBe(398);
+  });
+});
+
+describe('grid placement', () => {
+  it('places explicit items, then flows the rest', () => {
+    const { cells, rows } = placeGridItems([
+      { colStart: 1, colSpan: 7, rowStart: 1 },
+      { colStart: 8, colSpan: 5, rowStart: 1 },
+      undefined,
+      { colSpan: 12 },
+    ], 12);
+    expect(cells).toEqual([
+      { row: 0, col: 0, rowSpan: 1, colSpan: 7 },
+      { row: 0, col: 7, rowSpan: 1, colSpan: 5 },
+      { row: 1, col: 0, rowSpan: 1, colSpan: 1 },
+      { row: 2, col: 0, rowSpan: 1, colSpan: 12 },
+    ]);
+    expect(rows).toBe(3);
+  });
+  it('clamps spans and handles span-full', () => {
+    const { cells } = placeGridItems([{ colStart: 3, colSpan: 9 }, { colSpan: -1 }], 4);
+    expect(cells[0]).toEqual({ row: 0, col: 2, rowSpan: 1, colSpan: 2 });
+    expect(cells[1]).toEqual({ row: 1, col: 0, rowSpan: 1, colSpan: 4 });
   });
 });

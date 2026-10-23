@@ -160,3 +160,35 @@ describe('insets and translate', () => {
     expect(style.lineHeight).toBe(20);
   });
 });
+
+describe('Paper page sections', () => {
+  it('reads inset shorthands, v4 container widths, basis and min-h', () => {
+    const { style, unsupported } = tw('absolute inset-x-12 top-20 w-7xl basis-69.5 min-h-120 rounded-xs z-1 content-center');
+    expect(unsupported).toEqual([]);
+    expect([style.left, style.right, style.top]).toEqual([48, 48, 80]);
+    expect(style.width).toBe(1280);
+    expect(style.basis).toBe(278);
+    expect(style.minHeight).toBe(480);
+    expect(style.radius).toBe(2);
+    expect(tw('-inset-2').style.bottom).toBe(-8);
+  });
+
+  it('reads grid templates and item lines', () => {
+    const g = tw('grid grid-cols-[1fr_1fr_200px] grid-rows-[494.73px] gap-4 gap-y-2');
+    expect(g.unsupported).toEqual([]);
+    expect(g.style.grid).toEqual({ cols: [{ fr: 1 }, { fr: 1 }, { px: 200 }], rows: [{ px: 494.73 }], colGap: 16, rowGap: 8 });
+    expect(tw('grid grid-cols-12').style.grid?.cols).toHaveLength(12);
+    const item = tw('col-start-8 col-end-[span_5] row-start-1 row-end-auto self-center');
+    expect(item.unsupported).toEqual([]);
+    expect(item.style.gridItem).toEqual({ colStart: 8, colSpan: 5, rowStart: 1 });
+    expect(item.style.alignSelf).toBe('center');
+    expect(tw('col-start-2 col-end-4').style.gridItem).toEqual({ colStart: 2, colSpan: 2 });
+  });
+
+  it('reads gradient text and drop-shadow filters', () => {
+    expect(tw('bg-clip-text').style.clipText).toBe(true);
+    const f = tw('filter-[drop-shadow(#0000001A_0px_10px_7.5px)_drop-shadow(#0000001A_0px_4px_3px)]');
+    expect(f.unsupported).toEqual([]);
+    expect(f.style.shadows?.map((s) => s.y)).toEqual([10, 4]);
+  });
+});

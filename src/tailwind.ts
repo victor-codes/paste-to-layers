@@ -1,6 +1,6 @@
 import type { NormalizedStyle, RGBA } from './types';
 import { parseCssColor, tailwindColor, withAlpha } from './colors';
-import { inlineToStyle, parseFontStack, parseLinearGradient, parseOffset } from './inlineStyle';
+import { inlineToStyle, parseFontStack, parseLinearGradient, parseOffset, parseTracks } from './inlineStyle';
 
 const TEXT_SIZES: Record<string, [number, number]> = {
   xs: [12, 16], sm: [14, 20], base: [16, 24], lg: [18, 28], xl: [20, 28],
@@ -14,9 +14,10 @@ const FONT_WEIGHTS: Record<string, number> = {
 const FONT_FAMILIES: Record<string, string> = { sans: 'Inter', serif: 'Georgia', mono: 'Roboto Mono' };
 const LEADING: Record<string, number> = { none: 1, tight: 1.25, snug: 1.375, normal: 1.5, relaxed: 1.625, loose: 2 };
 const TRACKING: Record<string, number> = { tighter: -0.05, tight: -0.025, normal: 0, wide: 0.025, wider: 0.05, widest: 0.1 };
-const RADII: Record<string, number> = { none: 0, sm: 2, DEFAULT: 4, md: 6, lg: 8, xl: 12, '2xl': 16, '3xl': 24, full: 9999 };
+const RADII: Record<string, number> = { none: 0, xs: 2, sm: 2, DEFAULT: 4, md: 6, lg: 8, xl: 12, '2xl': 16, '3xl': 24, full: 9999 };
+/** Container scale: `max-w-*`, and in Tailwind v4 also `w-*` / `min-w-*` (`w-7xl` = 80rem). */
 const MAX_W: Record<string, number> = {
-  xs: 320, sm: 384, md: 448, lg: 512, xl: 576, '2xl': 672, '3xl': 768,
+  '3xs': 256, '2xs': 288, xs: 320, sm: 384, md: 448, lg: 512, xl: 576, '2xl': 672, '3xl': 768,
   '4xl': 896, '5xl': 1024, '6xl': 1152, '7xl': 1280, prose: 640,
 };
 type Shadow = NonNullable<NormalizedStyle['shadows']>[number];
@@ -28,7 +29,7 @@ const SHADOWS: Record<string, Shadow | null> = {
 };
 const GRADIENT_DIRS: Record<string, number> = { t: 0, tr: 45, r: 90, br: 135, b: 180, bl: 225, l: 270, tl: 315 };
 /** Classes with no visual effect in Figma (rendering hints, box model, wrapping, interaction). */
-const IGNORED = /^(antialiased|subpixel-antialiased|shrink(-0)?|flex-shrink(-0)?|grow-0|flex-grow-0|box-(border|content)|wrap-(anywhere|break-word|normal)|break-(words|all|normal|keep)|origin-.+|border-(solid|dashed|dotted|double|none)|cursor-.+|select-.+|pointer-events-.+|transition(-.+)?|duration-.+|ease-.+|delay-.+|will-change-.+|isolate|outline-none|whitespace-normal|list-none|static)$/;
+const IGNORED = /^(antialiased|subpixel-antialiased|shrink(-0)?|flex-shrink(-0)?|grow-0|flex-grow-0|box-(border|content)|wrap-(anywhere|break-word|normal)|break-(words|all|normal|keep)|origin-.+|border-(solid|dashed|dotted|double|none)|cursor-.+|select-.+|pointer-events-.+|transition(-.+)?|duration-.+|ease-.+|delay-.+|will-change-.+|isolate|outline-none|whitespace-normal|list-none|static|z-.+|content-(center|start|end|between|around|evenly|stretch|normal)|bg-(no-repeat|repeat|cover|contain|center|top|bottom|left|right)|bg-(size|position)-.+|row-end-auto|col-end-auto|row-start-auto|col-start-auto|self-auto|grid-flow-row)$/;
 
 const DEFAULT_BORDER_COLOR: RGBA = { r: 0xe5 / 255, g: 0xe7 / 255, b: 0xeb / 255, a: 1 };
 
@@ -95,13 +96,15 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
   let gradFrom: RGBA | undefined;
   let gradVia: RGBA | undefined;
   let gradTo: RGBA | undefined;
+  const tracks: { cols?: NonNullable<NormalizedStyle['grid']>['cols']; rows?: NonNullable<NormalizedStyle['grid']>['rows'] } = {};
+  const line: { colStart?: number; colEnd?: number; colSpan?: number; rowStart?: number; rowEnd?: number; rowSpan?: number } = {};
 
   const setSize = (axis: 'width' | 'height', val: string): boolean => {
     const sizing = axis === 'width' ? 'widthSizing' : 'heightSizing';
     if (val === 'full' || val === '[100%]') { style[sizing] = 'FILL'; delete style[axis]; return true; }
     if (val === 'fit' || val === 'auto' || val === 'max' || val === 'min') { style[sizing] = 'HUG'; delete style[axis]; return true; }
     if (val === 'screen') { style[axis] = axis === 'width' ? 1440 : 900; style[sizing] = 'FIXED'; return true; }
-    const n = length(val);
+    const n = axis === 'width' && val in MAX_W ? MAX_W[val] : length(val);
     if (n === null) return false;
     style[axis] = n;
     style[sizing] = 'FIXED';
@@ -137,7 +140,7 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
       const n = length(v);
       return n === null ? null : neg ? -n : n;
     };
-    if (neg && !/^(top|left|right|bottom|translate-[xy]|rotate|tracking)-/.test(tok)) return false;
+    if (neg && !/^(top|left|right|bottom|inset(-[xy])?|translate-[xy]|rotate|tracking)-/.test(tok)) return false;
 
     // arbitrary property: [prop:value]
     if ((m = /^\[([a-z-]+):(.+)\]$/.exec(tok))) return arbitraryProperty(m[1], m[2].replace(/_/g, ' '));
@@ -146,6 +149,11 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
       case 'flex': style.display = 'flex'; return true;
       case 'inline-flex': style.display = 'flex'; style.inline = true; return true;
       case 'block': style.display = 'block'; return true;
+      case 'grid': style.display = 'grid'; return true;
+      case 'bg-clip-text': style.clipText = true; return true;
+      case 'self-center': style.alignSelf = 'center'; return true;
+      case 'self-start': style.alignSelf = 'start'; return true;
+      case 'self-end': style.alignSelf = 'end'; return true;
       case 'inline-block': case 'inline': style.display = 'block'; style.inline = true; return true;
       case 'hidden': style.display = 'none'; return true;
       case 'flex-row': style.direction = 'row'; return true;
@@ -202,9 +210,50 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
     if ((m = /^(w|h)-(.+)$/.exec(tok))) return setSize(m[1] === 'w' ? 'width' : 'height', m[2]);
     if ((m = /^size-(.+)$/.exec(tok))) return setSize('width', m[1]) && setSize('height', m[1]);
     if ((m = /^min-w-(.+)$/.exec(tok))) {
-      const n = length(m[1]);
+      const n = m[1] in MAX_W ? MAX_W[m[1]] : length(m[1]);
       if (n === null) return false;
       style.minWidth = n; return true;
+    }
+    if ((m = /^min-h-(.+)$/.exec(tok))) {
+      const n = length(m[1]);
+      if (n === null) return false;
+      if (n > 0) style.minHeight = n;
+      return true;
+    }
+    if ((m = /^basis-(.+)$/.exec(tok))) {
+      if (m[1] === 'auto' || m[1] === '0') return true;
+      const n = m[1] in MAX_W ? MAX_W[m[1]] : length(m[1]);
+      if (n === null) return false;
+      style.basis = n; return true;
+    }
+    // grid
+    if ((m = /^grid-(cols|rows)-(.+)$/.exec(tok))) {
+      const t = /^\d+$/.test(m[2]) ? Array.from({ length: Number(m[2]) }, () => ({ fr: 1 }))
+        : /^\[.+\]$/.test(m[2]) ? parseTracks(m[2].slice(1, -1).replace(/_/g, ' ')) : null;
+      if (!t) return false;
+      tracks[m[1] as 'cols' | 'rows'] = t;
+      return true;
+    }
+    if ((m = /^(col|row)-(start|end|span)-(.+)$/.exec(tok))) {
+      const ax = m[1];
+      let n: number | null = /^\d+$/.test(m[3]) ? Number(m[3]) : null;
+      const sp = /^\[span_(\d+)\]$/.exec(m[3]);
+      if (m[2] === 'span' && m[3] === 'full') { line[ax === 'col' ? 'colStart' : 'rowStart'] = 1; line[ax === 'col' ? 'colEnd' : 'rowEnd'] = -1; return true; }
+      if (sp && m[2] !== 'start') { line[ax === 'col' ? 'colSpan' : 'rowSpan'] = Number(sp[1]); return true; }
+      if (n === null) return false;
+      const key = (ax + m[2][0].toUpperCase() + m[2].slice(1)) as keyof typeof line;
+      line[key] = n;
+      return true;
+    }
+    if ((m = /^inset(?:-([xy]))?-(.+)$/.exec(tok))) {
+      const o = offset(m[2]);
+      if (!o) return false;
+      const sides = m[1] === 'x' ? ['left', 'right'] : m[1] === 'y' ? ['top', 'bottom'] : ['top', 'right', 'bottom', 'left'];
+      for (const side of sides as ('top' | 'left' | 'right' | 'bottom')[]) {
+        style[side] = o.px;
+        if (o.pct) (style.insetPct ??= {})[side] = o.pct;
+      }
+      return true;
     }
     if ((m = /^max-w-(.+)$/.exec(tok))) {
       const n = m[1] in MAX_W ? MAX_W[m[1]] : length(m[1]);
@@ -228,7 +277,7 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
     }
 
     // radius
-    if ((m = /^rounded(?:-(t|r|b|l|tl|tr|br|bl))?(?:-(none|sm|md|lg|xl|2xl|3xl|full))?$/.exec(tok)) && tok !== 'rounded') {
+    if ((m = /^rounded(?:-(t|r|b|l|tl|tr|br|bl))?(?:-(none|xs|sm|md|lg|xl|2xl|3xl|full))?$/.exec(tok)) && tok !== 'rounded') {
       const r = RADII[m[2] ?? 'DEFAULT'];
       const idx: Record<string, number[]> = {
         '': [0, 1, 2, 3], t: [0, 1], r: [1, 2], b: [2, 3], l: [3, 0], tl: [0], tr: [1], br: [2], bl: [3],
@@ -253,6 +302,7 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
     if ((m = /^shadow-(sm|md|lg|xl|2xl|none)$/.exec(tok))) return applyShadow(m[1]);
 
     if ((m = /^shadow-\[(.+)\]$/.exec(tok))) return arbitraryProperty('box-shadow', m[1].replace(/_/g, ' '));
+    if ((m = /^filter-\[(.+)\]$/.exec(tok))) return arbitraryProperty('filter', m[1].replace(/_/g, ' '));
 
     // rotation
     if ((m = /^rotate-(\d*\.?\d+)$/.exec(tok))) { style.rotation = (neg ? -1 : 1) * parseFloat(m[1]); return true; }
@@ -387,6 +437,23 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
   if (gap !== undefined) style.gap = gap;
   if (dir === 'row' && gapX !== undefined) style.gap = gapX;
   if (dir === 'column' && gapY !== undefined) style.gap = gapY;
+  if (style.display === 'grid') {
+    style.grid = { cols: tracks.cols ?? [], rows: tracks.rows ?? [] };
+    if (gapX ?? gap) style.grid.colGap = gapX ?? gap;
+    if (gapY ?? gap) style.grid.rowGap = gapY ?? gap;
+  }
+  if (Object.keys(line).length) {
+    const span = (start?: number, end?: number, n?: number) =>
+      n ?? (start !== undefined && end !== undefined && end > start ? end - start : undefined);
+    const it: NonNullable<NormalizedStyle['gridItem']> = {};
+    if (line.colStart !== undefined) it.colStart = line.colStart;
+    const cs = line.colEnd === -1 ? -1 : span(line.colStart, line.colEnd, line.colSpan);
+    if (cs !== undefined) it.colSpan = cs;
+    if (line.rowStart !== undefined) it.rowStart = line.rowStart;
+    const rs = line.rowEnd === -1 ? -1 : span(line.rowStart, line.rowEnd, line.rowSpan);
+    if (rs !== undefined) it.rowSpan = rs;
+    if (Object.keys(it).length) style.gridItem = it;
+  }
   if (Object.keys(pad).length) {
     style.padding = { top: pad.top ?? 0, right: pad.right ?? 0, bottom: pad.bottom ?? 0, left: pad.left ?? 0 };
   }

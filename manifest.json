@@ -9,8 +9,9 @@
   ],
   "networkAccess": {
     "allowedDomains": [
-      "none"
-    ]
+      "*"
+    ],
+    "reasoning": "Loads the images referenced by pasted code (img src and background-image URLs)."
   },
   "documentAccess": "dynamic-page"
 }

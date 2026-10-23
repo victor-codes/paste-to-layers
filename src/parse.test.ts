@@ -236,6 +236,25 @@ describe('design-tool exports (Paper)', () => {
   });
 });
 
+describe('Paper page sections', () => {
+  it('moves a clipped gradient onto the text', () => {
+    const { root } = convert(`<div className="text-transparent bg-clip-text bg-linear-to-r from-red-500 to-red-700">FOUNDATIONAL PURPOSE</div>`);
+    expect(root.kind).toBe('text');
+    expect(root.style.textGradient?.stops).toHaveLength(2);
+    expect(root.style.gradient).toBeUndefined();
+  });
+  it('uses flex-basis as the main-axis size unless the item grows', () => {
+    const f = frame(convert(`<div className="flex"><div className="basis-20 bg-red-500" /><div className="grow basis-20 bg-red-500" /></div>`).root);
+    expect(f.children[0].style.width).toBe(80);
+    expect(f.children[1].style.width).toBeUndefined();
+    expect(f.children[1].style.widthSizing).toBe('FILL');
+  });
+  it('reads image urls from img src and background-image', () => {
+    const f = frame(convert(`<div><img src="https://x.test/a.png" /><div style={{ backgroundImage: 'url(https://x.test/b.jpg)' }} /></div>`).root);
+    expect(f.children.map((c) => c.style.imageUrl)).toEqual(['https://x.test/a.png', 'https://x.test/b.jpg']);
+  });
+});
+
 describe('inline-level elements', () => {
   it('marks spans, buttons and inline-flex as inline, leaves divs block', () => {
     const { root } = convert(`<div className="p-4"><div className="p-2 bg-red-500" /><button className="px-4 bg-blue-500">Go</button><div className="inline-flex p-1 bg-black" /></div>`);

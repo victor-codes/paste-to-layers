@@ -3,7 +3,7 @@ export type Sizing = 'HUG' | 'FILL' | 'FIXED';
 
 export interface NormalizedStyle {
   // layout
-  display?: 'flex' | 'block' | 'none';
+  display?: 'flex' | 'block' | 'grid' | 'none';
   inline?: boolean;               // inline-level box (span, inline-flex): not stretched by a block parent
   direction?: 'row' | 'column';
   gap?: number;
@@ -13,7 +13,11 @@ export interface NormalizedStyle {
   wrap?: boolean;
   width?: number; height?: number;
   widthSizing?: Sizing; heightSizing?: Sizing;
-  minWidth?: number; maxWidth?: number;
+  minWidth?: number; maxWidth?: number; minHeight?: number;
+  basis?: number;                 // flex-basis px; the main-axis size unless the item grows
+  alignSelf?: 'start' | 'center' | 'end';
+  grid?: { cols: GridTrack[]; rows: GridTrack[]; colGap?: number; rowGap?: number };
+  gridItem?: { colStart?: number; colSpan?: number; rowStart?: number; rowSpan?: number }; // 1-based starts like CSS; span -1 = all tracks
   position?: 'absolute' | 'relative';
   top?: number; left?: number; right?: number; bottom?: number; // px part of the inset
   insetPct?: { top?: number; right?: number; bottom?: number; left?: number }; // fraction of the parent's size (`calc(50% - 8px)`)
@@ -21,6 +25,8 @@ export interface NormalizedStyle {
   // box
   background?: RGBA;
   gradient?: Gradient;
+  imageUrl?: string;              // background-image: url(...)
+  clipText?: boolean;             // background-clip: text (the gradient paints the text instead)
   radius?: number | [number, number, number, number]; // tl,tr,br,bl
   border?: { width: number; color: RGBA };
   shadows?: { x: number; y: number; blur: number; spread: number; color: RGBA }[];
@@ -30,6 +36,7 @@ export interface NormalizedStyle {
   transformOrigin?: 'center' | 'top-left';
   // text
   color?: RGBA;
+  textGradient?: Gradient;
   fontFamily?: string;
   fontFallbacks?: string[];       // rest of the CSS font stack, generic families dropped
   fontSize?: number;
@@ -41,6 +48,9 @@ export interface NormalizedStyle {
   textTransform?: 'upper' | 'lower' | 'none';
   textDecoration?: 'underline' | 'line-through' | 'none';
 }
+
+/** Grid track: `fr` share, fixed px, or sized to content. */
+export type GridTrack = { fr: number } | { px: number } | 'auto';
 
 /** Linear gradient; `angle` follows CSS (0 = to top, 90 = to right), stop positions are 0..1. */
 export interface Gradient { angle: number; stops: { position: number; color: RGBA }[] }

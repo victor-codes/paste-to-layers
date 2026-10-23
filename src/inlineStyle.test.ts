@@ -112,4 +112,23 @@ describe('positioning and fonts from Paper exports', () => {
     expect(style.fontFamily).toBe('CooperBT-Medium');
     expect(style.fontFallbacks).toEqual(['Cooper BT']);
   });
+
+  it('reads background-image urls next to gradients', () => {
+    const { style, unsupported } = inlineToStyle({ backgroundImage: 'linear-gradient(0deg, #000000 0%, #ffffff 100%), url("https://x.test/a.jpg")' });
+    expect(unsupported).toEqual([]);
+    expect(style.imageUrl).toBe('https://x.test/a.jpg');
+    expect(style.gradient?.stops).toHaveLength(2);
+  });
+
+  it('reads grid templates and lines', () => {
+    const { style, unsupported } = inlineToStyle({ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr)) 120px', columnGap: '16px', gridColumn: '1 / span 2' });
+    expect(unsupported).toEqual([]);
+    expect(style.grid?.cols).toEqual([{ fr: 1 }, { fr: 1 }, { fr: 1 }, { px: 120 }]);
+    expect(style.grid?.colGap).toBe(16);
+    expect(style.gridItem).toEqual({ colStart: 1, colSpan: 2 });
+  });
+
+  it('keeps the line type of a text-decoration shorthand', () => {
+    expect(inlineToStyle({ textDecoration: 'underline 1px oklch(55% 0.2 30)' }).style.textDecoration).toBe('underline');
+  });
 });

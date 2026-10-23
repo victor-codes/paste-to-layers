@@ -9,7 +9,7 @@ type Dir = 'row' | 'column';
 
 const TEXT_KEYS = [
   'color', 'fontFamily', 'fontFallbacks', 'fontSize', 'fontWeight', 'fontStyle',
-  'lineHeight', 'letterSpacing', 'textAlign', 'textTransform',
+  'lineHeight', 'letterSpacing', 'textAlign', 'textTransform', 'textGradient',
 ] as const;
 
 /** Phrasing elements that can flow inside a single text layer. */
@@ -264,7 +264,7 @@ function collapseJsxText(raw: string): string {
 type Part = { t: 'text'; text: string } | { t: 'node'; node: IRNode };
 
 const hasBox = (s: NormalizedStyle): boolean =>
-  !!(s.background || s.gradient || s.padding || s.border || s.radius !== undefined || (s.shadows && s.shadows.length));
+  !!(s.background || s.gradient || s.imageUrl || s.padding || s.border || s.radius !== undefined || (s.shadows && s.shadows.length));
 
 function pickText(s: NormalizedStyle): NormalizedStyle {
   const out: Record<string, unknown> = {};
@@ -363,6 +363,11 @@ class Converter {
     const inl = inlineToStyle(obj);
     for (const u of inl.unsupported) this.warn(`Unsupported inline style: ${u}`);
     const style: NormalizedStyle = { ...tw.style, ...inl.style };
+    // `background-clip: text` paints the gradient through the glyphs, so it belongs to the text.
+    if (style.clipText) {
+      if (style.gradient) { style.textGradient = style.gradient; delete style.gradient; }
+      delete style.clipText;
+    }
     if (inlineGrow) { style.widthSizing = 'FILL'; grow = true; }
     if (selfStretch) style.heightSizing = 'FILL';
     return { style, classes, grow, explicitW, explicitH };
@@ -374,6 +379,11 @@ class Converter {
     parentDir: Dir | undefined,
   ) {
     if (!parentDir) return;
+    // flex-basis sets the main-axis size of items that don't grow (growing items share the space).
+    if (style.basis !== undefined && !grow) {
+      const axis = parentDir === 'row' ? 'width' : 'height';
+      if (style[axis] === undefined) { style[axis] = style.basis; style[axis === 'width' ? 'widthSizing' : 'heightSizing'] = 'FIXED'; }
+    }
     if (parentDir === 'column') {
       if (grow) {
         if (!explicitW) {
@@ -425,6 +435,8 @@ class Converter {
 
     if (tag === 'img') {
       const alt = attrStatic(getAttr(el, 'alt'));
+      const src = attrStatic(getAttr(el, 'src'));
+      if (typeof src === 'string' && /^(https?:|data:image\/)/.test(src)) style.imageUrl = src;
       return { kind: 'image', name: rootName ?? (alt ? String(alt) : 'image'), style };
     }
     if (tag === 'svg') {
@@ -440,7 +452,7 @@ class Converter {
 
     const dir: Dir = style.direction ?? (style.display === 'flex' ? 'row' : 'column');
 
-    if (!isUnknown && style.display !== 'flex') {
+    if (!isUnknown && style.display !== 'flex' && style.display !== 'grid') {
       const flow = this.inlineFlow(el.children, pickSpanText({ ...effective, ...style }));
       if (flow) {
         const base = hasBox(style) ? pickText(effective) : textOf(style);

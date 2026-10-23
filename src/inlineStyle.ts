@@ -1,4 +1,4 @@
-import type { Gradient, NormalizedStyle, RGBA, Sizing } from './types';
+import type { Gradient, GridTrack, NormalizedStyle, RGBA, Sizing } from './types';
 import { parseCssColor } from './colors';
 
 type Len = { px: number } | { fill: true } | null;
@@ -24,9 +24,11 @@ function splitTop(s: string, sep: RegExp = /\s+/): string[] {
 const IGNORED = new Set([
   'boxSizing', 'fontSynthesis', 'WebkitFontSmoothing', 'MozOsxFontSmoothing', 'textRendering',
   'fontFeatureSettings', 'fontOpticalSizing', 'overflowWrap', 'wordBreak', 'wordWrap', 'hyphens',
-  'flexShrink', 'flexBasis', 'cursor', 'userSelect', 'pointerEvents', 'WebkitTapHighlightColor',
+  'flexShrink', 'cursor', 'userSelect', 'pointerEvents', 'WebkitTapHighlightColor',
   'transition', 'transitionProperty', 'transitionDuration', 'transitionTimingFunction', 'willChange',
   'outline', 'listStyle', 'textSizeAdjust', 'WebkitTextSizeAdjust', 'borderStyle', 'contain', 'isolation',
+  'zIndex', 'fontVariationSettings', 'alignContent', 'textUnderlinePosition', 'textUnderlineOffset',
+  'backgroundSize', 'backgroundPosition', 'backgroundRepeat', 'objectFit', 'objectPosition',
 ]);
 
 const ANGLE_UNITS: Record<string, number> = { deg: 1, grad: 0.9, rad: 180 / Math.PI, turn: 360 };
@@ -124,6 +126,41 @@ export function parseTranslate(x: string, y = '0'): NonNullable<NormalizedStyle[
   return a && b ? { x: a.px, y: b.px, xPct: a.pct, yPct: b.pct } : null;
 }
 
+/** `grid-template-columns` value → tracks: `1fr 200px`, `repeat(12, minmax(0, 1fr))`, `auto`. */
+export function parseTracks(v: string): GridTrack[] | null {
+  const out: GridTrack[] = [];
+  for (const part of splitTop(v.trim())) {
+    const rep = /^repeat\(\s*(\d+)\s*,(.+)\)$/.exec(part);
+    if (rep) {
+      const inner = parseTracks(rep[2]);
+      if (!inner) return null;
+      for (let i = 0; i < Number(rep[1]); i++) out.push(...inner);
+      continue;
+    }
+    const mm = /^minmax\(.+,(.+)\)$/.exec(part);
+    const t = (mm ? mm[1] : part).trim();
+    let m: RegExpExecArray | null;
+    if ((m = /^(\d*\.?\d+)fr$/.exec(t))) out.push({ fr: parseFloat(m[1]) });
+    else if ((m = /^(\d*\.?\d+)(px|rem)?$/.exec(t))) out.push({ px: parseFloat(m[1]) * (m[2] === 'rem' ? 16 : 1) });
+    else if (/^(auto|min-content|max-content|fit-content\(.*\))$/.test(t)) out.push('auto');
+    else return null;
+  }
+  return out.length ? out : null;
+}
+
+/** `grid-column` value (`1 / span 7`, `2 / 4`, `span 3`) → 1-based start and span. */
+export function parseGridLine(v: string): { start?: number; span?: number } | null {
+  const [a, b] = v.split('/').map((p) => p.trim());
+  const line = (p: string | undefined) => (p && /^-?\d+$/.test(p) ? Number(p) : undefined);
+  const span = (p: string | undefined) => { const m = p ? /^span\s+(\d+)$/.exec(p) : null; return m ? Number(m[1]) : undefined; };
+  if (!a || (a !== 'auto' && line(a) === undefined && span(a) === undefined)) return null;
+  const start = line(a);
+  let n = span(a) ?? span(b);
+  const end = line(b);
+  if (n === undefined && start !== undefined && end !== undefined && end > start) n = end - start;
+  return { start, span: n };
+}
+
 function toKebabless(k: string): string {
   return k.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
 }
@@ -189,7 +226,7 @@ export function inlineToStyle(obj: Record<string, string | number>): { style: No
     switch (key) {
       case 'fontSize': break;
       case 'display':
-        if (sv === 'flex' || sv === 'block' || sv === 'none') style.display = sv;
+        if (sv === 'flex' || sv === 'block' || sv === 'grid' || sv === 'none') style.display = sv;
         else if (sv === 'inline-flex') { style.display = 'flex'; style.inline = true; }
         else if (sv === 'inline-block' || sv === 'inline') { style.display = 'block'; style.inline = true; }
         else unsupported.push(key);
@@ -255,6 +292,69 @@ export function inlineToStyle(obj: Record<string, string | number>): { style: No
         else { style[key] = l.px; style[sizing] = 'FIXED'; }
         break;
       }
+      case 'backgroundClip': case 'WebkitBackgroundClip':
+        if (sv === 'text') style.clipText = true;
+        break;
+      case 'flexBasis': {
+        if (sv === 'auto' || sv === '0' || sv === '0%') break;
+        const n = px(key, v);
+        if (n !== undefined) style.basis = n;
+        break;
+      }
+      case 'alignSelf': {
+        const m: Record<string, NormalizedStyle['alignSelf']> = {
+          'flex-start': 'start', start: 'start', 'self-start': 'start', center: 'center', 'flex-end': 'end', end: 'end', 'self-end': 'end',
+        };
+        if (m[sv]) style.alignSelf = m[sv]; else if (sv !== 'auto' && sv !== 'stretch') unsupported.push(key);
+        break;
+      }
+      case 'gridTemplateColumns': case 'gridTemplateRows': {
+        const tracks = parseTracks(sv);
+        if (!tracks) { unsupported.push(key); break; }
+        const g = (style.grid ??= { cols: [], rows: [] });
+        if (key === 'gridTemplateColumns') g.cols = tracks; else g.rows = tracks;
+        break;
+      }
+      case 'columnGap': case 'rowGap': {
+        const n = px(key, v);
+        if (n === undefined) break;
+        const g = (style.grid ??= { cols: [], rows: [] });
+        if (key === 'columnGap') g.colGap = n; else g.rowGap = n;
+        break;
+      }
+      case 'gridColumn': case 'gridRow': {
+        const l = parseGridLine(sv);
+        if (!l) { unsupported.push(key); break; }
+        const it = (style.gridItem ??= {});
+        if (key === 'gridColumn') { it.colStart = l.start; it.colSpan = l.span; } else { it.rowStart = l.start; it.rowSpan = l.span; }
+        break;
+      }
+      case 'filter': {
+        // drop-shadow() layers become shadows; other filters have no Figma equivalent.
+        const shadows: NonNullable<NormalizedStyle['shadows']> = [];
+        let bad = false;
+        for (const fn of splitTop(sv)) {
+          const m = /^drop-shadow\((.*)\)$/.exec(fn);
+          if (!m) { bad = true; continue; }
+          const nums: number[] = [];
+          let col: RGBA | undefined;
+          for (const p of splitTop(m[1])) {
+            const l = parseLen(p);
+            if (l && 'px' in l) nums.push(l.px);
+            else { const c = parseCssColor(p); if (c) col = c; else bad = true; }
+          }
+          if (nums.length < 2 || nums.length > 3) { bad = true; continue; }
+          shadows.push({ x: nums[0], y: nums[1], blur: nums[2] ?? 0, spread: 0, color: col ?? { r: 0, g: 0, b: 0, a: 1 } });
+        }
+        if (bad && sv !== 'none') unsupported.push(key);
+        if (shadows.length) style.shadows = [...(style.shadows ?? []), ...shadows];
+        break;
+      }
+      case 'minHeight': {
+        const n = px(key, v);
+        if (n !== undefined) style.minHeight = n;
+        break;
+      }
       case 'minWidth': case 'maxWidth': {
         const n = px(key, v);
         if (n !== undefined) style[key] = n;
@@ -279,12 +379,22 @@ export function inlineToStyle(obj: Record<string, string | number>): { style: No
         break;
       }
       case 'background': case 'backgroundColor': case 'backgroundImage': {
-        if (/linear-gradient\(/.test(sv)) {
-          const g = parseLinearGradient(sv);
-          if (g) style.gradient = g; else unsupported.push(key);
+        if (/gradient\(|url\(/.test(sv)) {
+          // Layers are comma-separated; keep the first url() and the first linear gradient.
+          let ok = false;
+          for (const layer of splitTop(sv, /,/)) {
+            const l = layer.trim();
+            const url = /^url\(\s*(['"]?)(.+?)\1\s*\)/.exec(l);
+            if (url) { style.imageUrl ??= url[2]; ok = true; continue; }
+            if (/^linear-gradient\(/.test(l) && !style.gradient) {
+              const g = parseLinearGradient(l);
+              if (g) { style.gradient = g; ok = true; }
+            }
+          }
+          if (!ok) unsupported.push(key);
           break;
         }
-        if (/gradient\(|url\(/.test(sv) || key === 'backgroundImage') {
+        if (key === 'backgroundImage') {
           if (sv !== 'none') unsupported.push(key);
           break;
         }
@@ -422,10 +532,13 @@ export function inlineToStyle(obj: Record<string, string | number>): { style: No
         else if (sv === 'none') style.textTransform = 'none';
         else unsupported.push(key);
         break;
-      case 'textDecoration':
-        if (sv === 'underline' || sv === 'line-through' || sv === 'none') style.textDecoration = sv;
+      case 'textDecoration': case 'textDecorationLine': {
+        // Shorthand like `underline 1px oklch(...)`: only the line type is modelled.
+        const line = splitTop(sv).find((p) => p === 'underline' || p === 'line-through' || p === 'none');
+        if (line) style.textDecoration = line as NormalizedStyle['textDecoration'];
         else unsupported.push(key);
         break;
+      }
       default:
         if (!IGNORED.has(key)) unsupported.push(key);
     }
