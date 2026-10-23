@@ -38,8 +38,8 @@ Conversion runs entirely inside Figma. The only network requests are downloads o
 **Limitations**
 Hover, responsive and dark-mode variants, margins, runtime state and custom Tailwind themes aren't supported. Custom components (`<Button>`) become plain frames. The full list is in the README.
 
-## Tags (up to 12)
-code to design, react, tailwind, jsx, import, html to figma, auto layout, developer, ai, paper, convert, layers
+## Tags (5 max)
+code to design, react, tailwind, auto layout, html to figma
 
 ## Category
 Design tools / Import & export
@@ -47,10 +47,10 @@ Design tools / Import & export
 ## Network access reasoning (shown to reviewers and users)
 Loads the images referenced by pasted code (img src and background-image URLs). No other data leaves the file.
 
-## Assets to prepare
-- Icon: 128×128 PNG
-- Cover image: 1920×1080 PNG (suggestion: pasted JSX on the left, the generated layers on the right, e.g. the Do-Nation page)
-- Optional: a short demo video or GIF of paste → convert
+## Assets
+- Icon: `publish/icon-128.png` (128×128)
+- Cover: `publish/cover-1920x1080.png` (1920×1080)
+- Sources: `publish/src/*.html`. To re-render, run headless Chrome with `--window-size` set to the image size and `--screenshot`.
 
 ## Support contact
 <your email or support URL>

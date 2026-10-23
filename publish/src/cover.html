@@ -1,0 +1,95 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0}
+html,body{width:1920px;height:1080px;overflow:hidden}
+body{font-family:-apple-system,"SF Pro Display",system-ui,sans-serif;color:#F4F3F6;
+  background:radial-gradient(1200px 700px at 78% 60%,#2A1A17 0%,#131216 60%) #131216;position:relative}
+body:before{content:"";position:absolute;inset:0;background-image:radial-gradient(#ffffff10 1.2px,transparent 1.2px);background-size:28px 28px}
+.head{position:absolute;left:120px;top:96px;display:flex;align-items:center;gap:28px}
+.head img{width:96px;height:96px}
+h1{font-size:72px;font-weight:700;letter-spacing:-2px;line-height:1}
+.tag{position:absolute;left:120px;top:226px;font-size:34px;color:#A9A7B0;letter-spacing:-0.3px}
+.tag b{color:#FF6A3D;font-weight:600}
+.editor{position:absolute;left:120px;top:330px;width:780px;height:640px;background:#1C1B21;border:1px solid #2E2D35;border-radius:20px;
+  box-shadow:0 40px 80px #0008;overflow:hidden}
+.bar{height:52px;display:flex;align-items:center;gap:10px;padding:0 22px;border-bottom:1px solid #2E2D35}
+.bar i{width:13px;height:13px;border-radius:50%;background:#3A3942}
+.bar span{margin-left:14px;font:500 17px ui-monospace,"SF Mono",monospace;color:#8E8C96}
+pre{font:400 19px/1.5 ui-monospace,"SF Mono",Menlo,monospace;padding:24px 30px;color:#D9D7DE;white-space:pre}
+.k{color:#C792EA}.t{color:#FF8A65}.a{color:#82AAFF}.s{color:#C3E88D}.p{color:#6F6D78}
+.arrow{position:absolute;left:930px;top:610px;width:150px;display:flex;flex-direction:column;align-items:center;gap:16px}
+.arrow svg{filter:drop-shadow(0 8px 20px #FF4A2A66)}
+.arrow div{font-size:17px;color:#A9A7B0;white-space:nowrap}
+.canvas{position:absolute;left:1110px;top:330px;width:690px;height:640px;background:#EDECEF;border-radius:20px;overflow:hidden;box-shadow:0 40px 80px #0008}
+.layers{position:absolute;left:0;top:0;bottom:0;width:230px;background:#fff;border-right:1px solid #DDDCE1;padding:18px 0;color:#2B2A30;font-size:15px}
+.layers h4{font-size:13px;font-weight:600;color:#8E8C96;padding:0 18px 12px;letter-spacing:.3px}
+.row{display:flex;align-items:center;gap:8px;height:30px;padding-right:12px;white-space:nowrap;overflow:hidden}
+.row.sel{background:#FFE9E2;color:#C3341C;font-weight:600}
+.ic{width:14px;height:14px;flex:none;color:#8E8C96}
+.row.sel .ic{color:#E5311B}
+.stage{position:absolute;left:230px;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center}
+.sizetag{position:absolute;font-family:-apple-system,system-ui,sans-serif;font-size:13px;font-weight:600;color:#fff;background:#E5311B;border-radius:4px;padding:3px 7px}
+.card{width:340px;background:#fff;border-radius:20px;padding:32px;display:flex;flex-direction:column;gap:20px;
+  box-shadow:0 10px 30px #0000001a;outline:2px solid #E5311B;outline-offset:0;position:relative;color:#0C0C0C}
+.pad{position:absolute;background:repeating-linear-gradient(135deg,#FF6A3D33 0 3px,transparent 3px 7px)}
+.badge{align-self:flex-start;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#E5311B;background:#FFEDE7;border-radius:999px;padding:5px 12px}
+.price{font-size:52px;font-weight:700;letter-spacing:-1.5px}.price small{font-size:18px;color:#7A7882;font-weight:500;letter-spacing:0}
+ul{list-style:none;padding:0;display:flex;flex-direction:column;gap:10px;font-size:16px;color:#3B3A42}
+li:before{content:"✓";color:#E5311B;font-weight:700;margin-right:10px}
+.btn{background:linear-gradient(90deg,#FF5A2E,#E5311B);color:#fff;border-radius:12px;padding:14px;text-align:center;font-weight:600;font-size:17px}
+</style></head><body>
+<div class="head"><img src="../icon-128.png"><h1>Paste to Layers</h1></div>
+<div class="tag">Paste <b>React + Tailwind</b> code. Get editable layers with real auto layout.</div>
+
+<div class="editor"><div class="bar"><i></i><i></i><i></i><span>PricingCard.tsx</span></div>
+<pre><span class="k">export default function</span> <span class="a">PricingCard</span>() {
+  <span class="k">return</span> (
+    <span class="p">&lt;</span><span class="t">div</span> <span class="a">className</span>=<span class="s">"flex flex-col gap-5 p-8</span>
+<span class="s">      w-[340px] rounded-[20px] bg-white shadow-lg"</span><span class="p">&gt;</span>
+      <span class="p">&lt;</span><span class="t">span</span> <span class="a">className</span>=<span class="s">"self-start rounded-full</span>
+<span class="s">        px-3 py-1 text-xs font-bold uppercase"</span><span class="p">&gt;</span>
+        Pro
+      <span class="p">&lt;/</span><span class="t">span</span><span class="p">&gt;</span>
+      <span class="p">&lt;</span><span class="t">p</span> <span class="a">className</span>=<span class="s">"text-5xl font-bold"</span><span class="p">&gt;</span>
+        $24 <span class="p">&lt;</span><span class="t">small</span><span class="p">&gt;</span>/ month<span class="p">&lt;/</span><span class="t">small</span><span class="p">&gt;</span>
+      <span class="p">&lt;/</span><span class="t">p</span><span class="p">&gt;</span>
+      <span class="p">&lt;</span><span class="t">ul</span> <span class="a">className</span>=<span class="s">"flex flex-col gap-2.5"</span><span class="p">&gt;</span>…<span class="p">&lt;/</span><span class="t">ul</span><span class="p">&gt;</span>
+      <span class="p">&lt;</span><span class="t">button</span> <span class="a">className</span>=<span class="s">"rounded-xl py-3.5</span>
+<span class="s">        bg-linear-to-r from-orange-500 to-red-600"</span><span class="p">&gt;</span>
+        Get started
+      <span class="p">&lt;/</span><span class="t">button</span><span class="p">&gt;</span>
+    <span class="p">&lt;/</span><span class="t">div</span><span class="p">&gt;</span>
+  );
+}</pre></div>
+
+<div class="arrow">
+  <svg width="120" height="120" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#FF6A3D"/><stop offset="1" stop-color="#E5311B"/></linearGradient></defs>
+  <circle cx="60" cy="60" r="56" fill="url(#g)"/><path d="M38 60 H80 M66 44 L82 60 L66 76" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+  <div>Create layers ⌘↵</div>
+</div>
+
+<div class="canvas">
+  <div class="layers"><h4>LAYERS</h4>
+    <div class="row sel" style="padding-left:14px"><svg class="ic" viewBox="0 0 14 14"><path d="M2 3h10M2 7h10M2 11h10" stroke="currentColor" stroke-width="1.6"/></svg>PricingCard</div>
+    <div class="row" style="padding-left:34px"><svg class="ic" viewBox="0 0 14 14"><path d="M3 2v10M7 2v10M11 2v10" stroke="currentColor" stroke-width="1.6"/></svg>span.self-start</div>
+    <div class="row" style="padding-left:54px"><svg class="ic" viewBox="0 0 14 14"><path d="M3 3h8M7 3v8" stroke="currentColor" stroke-width="1.8"/></svg>Pro</div>
+    <div class="row" style="padding-left:34px"><svg class="ic" viewBox="0 0 14 14"><path d="M3 3h8M7 3v8" stroke="currentColor" stroke-width="1.8"/></svg>$24 / month</div>
+    <div class="row" style="padding-left:34px"><svg class="ic" viewBox="0 0 14 14"><path d="M2 3h10M2 7h10M2 11h10" stroke="currentColor" stroke-width="1.6"/></svg>ul.flex</div>
+    <div class="row" style="padding-left:54px"><svg class="ic" viewBox="0 0 14 14"><path d="M3 3h8M7 3v8" stroke="currentColor" stroke-width="1.8"/></svg>Unlimited projects</div>
+    <div class="row" style="padding-left:54px"><svg class="ic" viewBox="0 0 14 14"><path d="M3 3h8M7 3v8" stroke="currentColor" stroke-width="1.8"/></svg>Team libraries</div>
+    <div class="row" style="padding-left:54px"><svg class="ic" viewBox="0 0 14 14"><path d="M3 3h8M7 3v8" stroke="currentColor" stroke-width="1.8"/></svg>Priority support</div>
+    <div class="row" style="padding-left:34px"><svg class="ic" viewBox="0 0 14 14"><path d="M3 2v10M7 2v10M11 2v10" stroke="currentColor" stroke-width="1.6"/></svg>button</div>
+    <div class="row" style="padding-left:54px"><svg class="ic" viewBox="0 0 14 14"><path d="M3 3h8M7 3v8" stroke="currentColor" stroke-width="1.8"/></svg>Get started</div>
+  </div>
+  <div class="stage">
+    <div class="card">
+      <div class="pad" style="left:0;right:0;top:0;height:32px;border-radius:20px 20px 0 0"></div>
+      <div class="pad" style="left:0;top:32px;bottom:32px;width:32px"></div>
+      <div class="sizetag" style="left:50%;transform:translateX(-50%);bottom:-34px">340 × Hug</div>
+      <div class="badge">Pro</div>
+      <div class="price">$24 <small>/ month</small></div>
+      <ul><li>Unlimited projects</li><li>Team libraries</li><li>Priority support</li></ul>
+      <div class="btn">Get started</div>
+    </div>
+  </div>
+</div>
+</body></html>
