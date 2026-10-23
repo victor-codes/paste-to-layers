@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex; flex-direction: column;
+    font: 11px/16px Inter, system-ui, sans-serif;
+    color: var(--figma-color-text, #1e1e1e);
+    background: var(--figma-color-bg, #fff);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Header — where am I, what does this do */
+  header { padding: 16px 16px 12px; }
+  h1 { margin: 0; font-size: 13px; line-height: 20px; font-weight: 600; letter-spacing: -0.005em; }
+  .sub { margin: 2px 0 0; color: var(--figma-color-text-secondary, #757575); }
+
+  /* Editor */
+  .editor { position: relative; flex: 1; display: flex; padding: 0 16px; min-height: 0; }
+  textarea {
+    flex: 1; width: 100%; resize: none; padding: 12px;
+    font: 12px/18px "SF Mono", ui-monospace, Menlo, Consolas, monospace; tab-size: 2; white-space: pre; overflow-wrap: normal; overflow: auto;
+    color: var(--figma-color-text, #1e1e1e);
+    background: var(--figma-color-bg-secondary, #f5f5f5);
+    border: 1px solid transparent; border-radius: 6px;
+    transition: border-color 120ms ease-out, background-color 120ms ease-out;
+  }
+  textarea:hover { border-color: var(--figma-color-border, #e6e6e6); }
+  textarea:focus {
+    outline: none; background: var(--figma-color-bg, #fff);
+    border-color: var(--figma-color-border-selected, #0d99ff);
+  }
+  .editor.invalid textarea { border-color: var(--figma-color-border-danger-strong, #f24822); }
+
+  /* Empty state sits on top of the editor; clicks pass through to the textarea */
+  .empty {
+    position: absolute; inset: 0 16px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px; padding: 24px;
+    text-align: center; pointer-events: none;
+    color: var(--figma-color-text-secondary, #757575);
+    transition: opacity 150ms ease-out;
+  }
+  .empty strong { display: block; font-size: 12px; font-weight: 600; color: var(--figma-color-text, #1e1e1e); }
+  .empty .link { pointer-events: auto; }
+  .editor.has-code .empty { opacity: 0; visibility: hidden; }
+
+  /* Status + warnings */
+  .meta { padding: 8px 16px 0; display: flex; flex-direction: column; gap: 6px; }
+  #status { display: flex; align-items: center; gap: 6px; min-height: 16px; color: var(--figma-color-text-secondary, #757575); }
+  #status .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: currentColor; }
+  #status .msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #status[data-kind="error"] { color: var(--figma-color-text-danger, #dc3412); }
+  #status[data-kind="error"] .msg { white-space: normal; }
+  #status[data-kind="ok"] { color: var(--figma-color-text-success, #009951); }
+  #status[data-kind="idle"] .dot { display: none; }
+  #status[data-kind="error"][title] .msg { text-decoration: underline dotted; text-underline-offset: 2px; }
+
+  details { border-radius: 6px; background: var(--figma-color-bg-warning-tertiary, #fff8eb); }
+  details[hidden] { display: none; }
+  summary {
+    cursor: default; list-style: none; padding: 6px 10px; border-radius: 6px;
+    color: var(--figma-color-text-warning, #b86200); font-weight: 500;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "›"; display: inline-block; width: 10px; transition: transform 150ms ease-out; }
+  details[open] summary::before { transform: rotate(90deg); }
+  ul { margin: 0; padding: 0 10px 8px 20px; max-height: 112px; overflow: auto; color: var(--figma-color-text, #1e1e1e); }
+  li + li { margin-top: 2px; }
+
+  /* Footer */
+  footer { display: flex; align-items: center; gap: 8px; padding: 12px 16px 16px; }
+  .spacer { flex: 1; }
+  .link {
+    padding: 0; border: 0; background: none; cursor: default; font: inherit; font-weight: 500;
+    color: var(--figma-color-text-brand, #0d99ff);
+  }
+  .link:hover { text-decoration: underline; }
+  .link:disabled { visibility: hidden; }
+  .primary {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 32px; padding: 0 12px; border: 0; border-radius: 6px; cursor: default;
+    font: 500 11px/16px Inter, system-ui, sans-serif;
+    color: var(--figma-color-text-onbrand, #fff);
+    background: var(--figma-color-bg-brand, #0d99ff);
+    transition: transform 100ms ease-out, background-color 100ms ease-out, opacity 150ms ease-out;
+  }
+  .primary:hover { background: var(--figma-color-bg-brand-hover, #0a8ae6); }
+  /* Feedback on press, not on release */
+  .primary:active { transform: scale(0.97); background: var(--figma-color-bg-brand-pressed, #0a7ccf); }
+  .primary:disabled { opacity: .4; transform: none; }
+  .primary:focus-visible, .link:focus-visible { outline: 2px solid var(--figma-color-border-selected, #0d99ff); outline-offset: 2px; }
+  kbd { font: inherit; opacity: .72; letter-spacing: 0.04em; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Paste to Layers</h1>
+  <p class="sub">Paste a component styled with Tailwind or inline styles.</p>
+</header>
+
+<div class="editor" id="editor">
+  <textarea id="code" spellcheck="false" autocomplete="off" aria-label="React component source" aria-describedby="status"></textarea>
+  <div class="empty" id="empty">
+    <div><strong>Nothing to convert yet</strong>JSX, TSX, or a whole component file all work.</div>
+    <button class="link" id="example" type="button">Insert an example</button>
+  </div>
+</div>
+
+<div class="meta">
+  <div id="status" role="status" aria-live="polite" data-kind="idle"><span class="dot"></span><span class="msg"></span></div>
+  <details id="warnings" hidden><summary id="warnCount"></summary><ul id="warnList"></ul></details>
+</div>
+
+<footer>
+  <button class="link" id="clear" type="button">Clear</button>
+  <span class="spacer"></span>
+  <button class="primary" id="convert" type="button" disabled>Create layers <kbd>⌘↵</kbd></button>
+</footer>
+<!-- UI_SCRIPT -->
+</body>
+</html>
