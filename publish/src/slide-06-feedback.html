@@ -1,0 +1,52 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="base.css"><style>
+.ui{position:absolute;left:120px;top:322px;width:400px;transform:scale(1.5);transform-origin:0 0;background:#fff;border-radius:12px;box-shadow:0 30px 60px #0009;color:#1e1e1e;font:11px/16px -apple-system,system-ui,sans-serif;overflow:hidden}
+.ui header{padding:12px 12px 8px}.ui h1{font-size:13px;line-height:20px;font-weight:600}.ui .sub{color:#757575;margin-top:2px}
+.ui textarea{display:block;margin:0 12px;width:376px;height:222px;resize:none;border:1px solid #0d99ff;border-radius:6px;padding:10px;font:10px/15px ui-monospace,"SF Mono",monospace;color:#1e1e1e;white-space:pre}
+.ui .meta{padding:8px 12px 0;display:flex;flex-direction:column;gap:6px}
+.ui .status{color:#757575}
+.ui details{border-radius:6px;background:#fff8eb}
+.ui summary{list-style:none;padding:6px 10px;color:#b86200;font-weight:500}
+.ui summary::before{content:"›";display:inline-block;width:10px;transform:rotate(90deg)}
+.ui ul{padding:0 10px 8px 20px}.ui li+li{margin-top:2px}
+.ui footer{display:flex;align-items:center;padding:10px 12px 12px}
+.ui .link{color:#0d99ff;font-weight:500}.ui .sp{flex:1}
+.ui .primary{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:6px;background:#0d99ff;color:#fff;font-weight:500}
+.ui kbd{font:inherit;opacity:.72}
+.notes{position:absolute;left:880px;top:380px;width:920px;display:flex;flex-direction:column;gap:30px}
+.n{display:flex;gap:24px;align-items:flex-start}
+.n .d{flex:none;width:56px;height:56px;border-radius:14px;background:#FF6A3D22;color:#FF8A65;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700}
+.n h3{font-size:30px;font-weight:700;letter-spacing:-.5px;margin-bottom:8px}
+.n p{font-size:22px;color:#A9A7B0;line-height:1.4}
+</style></head><body>
+<div class="eyebrow">No surprises</div>
+<h2>It tells you what won't carry over</h2>
+<div class="lede">Code is checked as you paste, before anything touches your canvas.</div>
+<div class="ui">
+  <header><h1>Paste to Layers</h1><p class="sub">Paste a component styled with Tailwind or inline styles.</p></header>
+  <textarea readonly>export default function PricingCard() {
+  return (
+    &lt;div className="flex flex-col gap-5 p-8
+      md:flex-row rounded-[20px] bg-white"&gt;
+      &lt;Icon name="spark" /&gt;
+      &lt;p className="text-5xl font-bold"&gt;$24&lt;/p&gt;
+      &lt;button className="rounded-xl py-3.5
+        bg-red-600 hover:bg-red-700"&gt;
+        Get started
+      &lt;/button&gt;
+    &lt;/div&gt;
+  );
+}</textarea>
+  <div class="meta"><div class="status">PricingCard · 5 layers</div>
+  <details open><summary>3 things won't carry over</summary><ul>
+    <li>Unsupported Tailwind class: md:flex-row</li>
+    <li>Unknown component &lt;Icon&gt; rendered as a frame</li>
+    <li>Unsupported Tailwind class: hover:bg-red-700</li></ul></details></div>
+  <footer><span class="link">Clear</span><span class="sp"></span><span class="primary">Create layers <kbd>⌘↵</kbd></span></footer>
+</div>
+<div class="notes">
+  <div class="n"><div class="d">1</div><div><h3>Live check while you type</h3><p>Syntax errors point to the exact line, and the layer count updates as you edit.</p></div></div>
+  <div class="n"><div class="d">2</div><div><h3>A short list, not a wall of errors</h3><p>Hover states, breakpoints and unknown components are listed once each.</p></div></div>
+  <div class="n"><div class="d">3</div><div><h3>Fonts and images reported too</h3><p>Missing fonts name the fallback used; images that won't load get a placeholder.</p></div></div>
+</div>
+<div class="foot"><img src="../icon-128.png">Paste to Layers</div>
+</body></html>

@@ -50,6 +50,12 @@ Loads the images referenced by pasted code (img src and background-image URLs). 
 ## Assets
 - Icon: `publish/icon-128.png` (128×128)
 - Cover: `publish/cover-1920x1080.png` (1920×1080)
+- Carousel (1920×1080, in this order after the cover):
+  1. `slide-02-auto-layout.png`: flexbox classes → auto layout settings
+  2. `slide-03-grid.png`: CSS grid → Figma grid
+  3. `slide-04-text.png`: mixed text as one layer, font fallback
+  4. `slide-05-sources.png`: Tailwind, inline styles, Paper, AI-generated code
+  5. `slide-06-feedback.png`: the plugin window with its warnings
 - Sources: `publish/src/*.html`. To re-render, run headless Chrome with `--window-size` set to the image size and `--screenshot`.
 
 ## Support contact

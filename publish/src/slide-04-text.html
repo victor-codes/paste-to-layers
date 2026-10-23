@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="base.css"><style>
+.code{left:120px;top:340px;width:760px;height:400px}
+.fonts{left:120px;top:770px;width:760px;height:210px;padding:28px 34px;font-size:22px}
+.fonts .lbl{font-size:15px;font-weight:600;color:#8E8C96;letter-spacing:.4px;margin-bottom:16px}
+.chain{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.chip{border-radius:10px;padding:10px 16px;background:#2A2930;font-size:20px;color:#A9A7B0}
+.chip.ok{background:#FF6A3D22;color:#FF8A65;outline:1.5px solid #FF6A3D}
+.chip s{color:#6F6D78}
+.canvas{left:1000px;top:340px;width:800px;height:640px;display:flex;flex-direction:column}
+.stage{flex:1;display:flex;align-items:center;justify-content:center;padding:40px;background:#FBF7F3}
+.txt{font-family:"New York","Iowan Old Style",Georgia,serif;font-size:58px;line-height:1.12;letter-spacing:-1px;color:#141316;outline:2px solid #FF6A3D;padding:6px 10px;position:relative}
+.txt em{color:#E5311B}
+.txt b{font-family:-apple-system,system-ui,sans-serif;font-weight:800;letter-spacing:-1.5px}
+.txt u{text-decoration-thickness:4px;text-underline-offset:8px;text-decoration-color:#E5311B}
+.layer{height:96px;background:#fff;border-top:1px solid #DDDCE1;display:flex;align-items:center;gap:16px;padding:0 30px;font-size:20px}
+.layer .T{width:34px;height:34px;border-radius:8px;background:#FFE9E2;color:#E5311B;display:flex;align-items:center;justify-content:center;font-weight:700}
+.layer small{margin-left:auto;color:#8E8C96;font-size:17px}
+</style></head><body>
+<div class="eyebrow">Typography</div>
+<h2>Mixed text stays one text layer</h2>
+<div class="lede">Bold, italic, color and underline spans become styled ranges, and font stacks fall back the way browsers do.</div>
+<div class="panel code"><div class="bar"><i></i><i></i><i></i><span>Hero.tsx</span></div>
+<pre><span class="p">&lt;</span><span class="t">h1</span> <span class="a">className</span>=<span class="s">"font-['Newsreader',Georgia]</span>
+<span class="s">  text-6xl tracking-tight"</span><span class="p">&gt;</span>
+  Design from <span class="p">&lt;</span><span class="t">em</span> <span class="a">className</span>=<span class="s">"text-red-600"</span><span class="p">&gt;</span>real
+  code<span class="p">&lt;/</span><span class="t">em</span><span class="p">&gt;</span>, <span class="p">&lt;</span><span class="t">b</span> <span class="a">className</span>=<span class="s">"font-sans"</span><span class="p">&gt;</span>not<span class="p">&lt;/</span><span class="t">b</span><span class="p">&gt;</span> <span class="p">&lt;</span><span class="t">u</span><span class="p">&gt;</span>
+  screenshots<span class="p">&lt;/</span><span class="t">u</span><span class="p">&gt;</span>.
+<span class="p">&lt;/</span><span class="t">h1</span><span class="p">&gt;</span></pre></div>
+<div class="panel fonts"><div class="lbl">FONT STACK</div>
+  <div class="chain"><span class="chip"><s>Newsreader</s> not installed</span><span style="color:#5D5B66">→</span><span class="chip ok">Georgia ✓</span><span style="color:#5D5B66">→</span><span class="chip">Inter</span></div>
+</div>
+<div class="arrow" style="left:885px;top:600px;width:110px"><svg width="110" height="110" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#FF6A3D"/><stop offset="1" stop-color="#E5311B"/></linearGradient></defs><circle cx="60" cy="60" r="56" fill="url(#g)"/><path d="M38 60 H80 M66 44 L82 60 L66 76" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div>
+<div class="light canvas">
+  <div class="stage"><div class="txt">Design from <em>real<br>code</em>, <b>not</b> <u>screenshots</u>.</div></div>
+  <div class="layer"><div class="T">T</div>Design from real code, not screenshots.<small>1 layer · 3 styled ranges</small></div>
+</div>
+<div class="foot"><img src="../icon-128.png">Paste to Layers</div>
+</body></html>

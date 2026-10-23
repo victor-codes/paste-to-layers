@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="base.css"><style>
+.map{left:120px;top:340px;width:820px;padding:10px 0}
+.map .r{display:grid;grid-template-columns:330px 60px 1fr;align-items:center;height:78px;padding:0 36px;border-top:1px solid #2A2930;font-size:24px}
+.map .r:first-child{border-top:0}
+.map code{font:500 23px ui-monospace,"SF Mono",monospace;color:#C3E88D}
+.map .to{color:#5D5B66;font-size:26px}
+.map b{font-weight:600;color:#fff}
+.map small{color:#8E8C96;font-size:19px;margin-left:10px}
+.props{left:1060px;top:340px;width:740px;height:568px;padding:34px 38px;background:#fff}
+.props h4{font-size:18px;font-weight:600;color:#1E1E22;margin-bottom:22px;display:flex;justify-content:space-between}
+.props h4 span{color:#8E8C96;font-weight:500}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:28px}
+.f{height:56px;border-radius:10px;background:#F3F2F5;display:flex;align-items:center;gap:14px;padding:0 18px;font-size:20px;color:#1E1E22}
+.f em{font-style:normal;color:#8E8C96;font-size:17px;width:22px}
+.f.hl{outline:2px solid #FF6A3D;background:#FFF3EE}
+.seg{display:flex;gap:8px;margin-bottom:28px}
+.seg div{flex:1;height:56px;border-radius:10px;background:#F3F2F5;display:flex;align-items:center;justify-content:center;color:#8E8C96}
+.seg div.on{background:#FFE9E2;color:#E5311B;outline:2px solid #FF6A3D}
+.lbl{font-size:15px;font-weight:600;color:#8E8C96;letter-spacing:.4px;margin-bottom:10px}
+</style></head><body>
+<div class="eyebrow">Auto layout</div>
+<h2>Real auto layout, not flat shapes</h2>
+<div class="lede">Flexbox maps straight onto Figma's auto layout, so the result resizes and reflows like the code.</div>
+<div class="panel map">
+  <div class="r"><code>flex flex-col</code><span class="to">→</span><span><b>Vertical</b> auto layout</span></div>
+  <div class="r"><code>gap-5</code><span class="to">→</span><span><b>20</b> gap</span></div>
+  <div class="r"><code>p-8</code><span class="to">→</span><span><b>32</b> padding</span></div>
+  <div class="r"><code>items-center</code><span class="to">→</span><span><b>Center</b> alignment</span></div>
+  <div class="r"><code>w-[340px]</code><span class="to">→</span><span><b>Fixed</b> 340 <small>height: Hug</small></span></div>
+  <div class="r"><code>flex-1 · w-full</code><span class="to">→</span><span><b>Fill</b> container</span></div>
+  <div class="r"><code>justify-between</code><span class="to">→</span><span><b>Space between</b></span></div>
+</div>
+<div class="light props">
+  <h4>Auto layout <span>PricingCard</span></h4>
+  <div class="lbl">DIRECTION</div>
+  <div class="seg"><div class="on">↓ Vertical</div><div>→ Horizontal</div><div>⊞ Grid</div></div>
+  <div class="lbl">SIZE</div>
+  <div class="grid2"><div class="f hl"><em>W</em>340 <span style="margin-left:auto;color:#8E8C96;font-size:16px">Fixed</span></div><div class="f"><em>H</em>Hug</div></div>
+  <div class="lbl">SPACING</div>
+  <div class="grid2"><div class="f hl"><em>⇕</em>20 gap</div><div class="f hl"><em>▢</em>32 padding</div></div>
+  <div class="lbl">ALIGNMENT</div>
+  <div class="grid2"><div class="f hl"><em>⌖</em>Center</div><div class="f"><em>⇥</em>Packed</div></div>
+</div>
+<div class="foot"><img src="../icon-128.png">Paste to Layers</div>
+</body></html>

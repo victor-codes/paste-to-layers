@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="base.css"><style>
+.cards{position:absolute;left:120px;top:350px;width:1680px;display:grid;grid-template-columns:repeat(4,1fr);gap:28px}
+.c{background:#1C1B21;border:1px solid #2E2D35;border-radius:20px;padding:30px;height:330px;display:flex;flex-direction:column;gap:18px;box-shadow:0 30px 60px #0007}
+.c h3{font-size:28px;font-weight:700;letter-spacing:-.5px}
+.c p{font-size:19px;color:#A9A7B0;line-height:1.4}
+.c pre{margin-top:auto;padding:16px 18px;background:#141317;border-radius:12px;font-size:16px;line-height:1.5;white-space:pre-wrap;word-break:break-all}
+.down{position:absolute;left:0;right:0;top:712px;display:flex;justify-content:center}
+.result{position:absolute;left:560px;top:840px;width:800px;height:110px;background:#fff;border-radius:20px;display:flex;align-items:center;justify-content:center;gap:18px;color:#1E1E22;font-size:30px;font-weight:700;letter-spacing:-.5px;box-shadow:0 30px 60px #0008}
+.result img{width:56px;height:56px}
+</style></head><body>
+<div class="eyebrow">Paste from anywhere</div>
+<h2>Whatever wrote the code</h2>
+<div class="lede">Your own components, AI-generated UI, or exports from design tools. If it's static JSX, it converts.</div>
+<div class="cards">
+  <div class="c"><h3>Tailwind v3 &amp; v4</h3><p>Default scale, arbitrary values and v4 shorthands.</p>
+<pre><span class="s">text-sm/6 w-[960px]
+tracking-[-0.02em]
+font-['Inter_Tight']</span></pre></div>
+  <div class="c"><h3>Inline styles</h3><p>camelCase style objects with px, rem, em and %.</p>
+<pre><span class="a">style</span>={{ <span class="a">padding</span>: <span class="s">'24px'</span>,
+  <span class="a">gap</span>: <span class="s">'1rem'</span> }}</pre></div>
+  <div class="c"><h3>Paper exports</h3><p>Absolute layouts, font stacks and SVGs copied from Paper.</p>
+<pre><span class="s">left-[calc(50%-8px)]
+-translate-x-1/2</span></pre></div>
+  <div class="c"><h3>AI-generated UI</h3><p><code>cn()</code> / <code>clsx()</code>, lists and conditionals, read as static markup.</p>
+<pre><span class="a">cn</span>(<span class="s">'flex gap-2'</span>,
+  ok &amp;&amp; <span class="s">'p-4'</span>)</pre></div>
+</div>
+<div class="down"><svg width="90" height="110" viewBox="0 0 90 110"><defs><linearGradient id="d" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF6A3D"/><stop offset="1" stop-color="#E5311B"/></linearGradient></defs><path d="M45 6 V96 M18 70 L45 98 L72 70" stroke="url(#d)" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div>
+<div class="result"><img src="../icon-128.png">Editable Figma layers</div>
+</body></html>

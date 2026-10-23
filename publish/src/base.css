@@ -1,0 +1,20 @@
+*{box-sizing:border-box;margin:0}
+html,body{width:1920px;height:1080px;overflow:hidden}
+body{font-family:-apple-system,"SF Pro Display",system-ui,sans-serif;color:#F4F3F6;
+  background:radial-gradient(1200px 700px at 78% 60%,#2A1A17 0%,#131216 60%) #131216;position:relative}
+body:before{content:"";position:absolute;inset:0;background-image:radial-gradient(#ffffff10 1.2px,transparent 1.2px);background-size:28px 28px}
+.eyebrow{position:absolute;left:120px;top:100px;font-size:22px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:#FF6A3D}
+h2{position:absolute;left:120px;top:142px;font-size:68px;font-weight:700;letter-spacing:-2px;line-height:1.05}
+.lede{position:absolute;left:120px;top:236px;font-size:30px;color:#A9A7B0;letter-spacing:-0.2px;max-width:1500px}
+.panel{position:absolute;background:#1C1B21;border:1px solid #2E2D35;border-radius:20px;box-shadow:0 40px 80px #0008;overflow:hidden}
+.bar{height:52px;display:flex;align-items:center;gap:10px;padding:0 22px;border-bottom:1px solid #2E2D35}
+.bar i{width:13px;height:13px;border-radius:50%;background:#3A3942}
+.bar span{margin-left:14px;font:500 17px ui-monospace,"SF Mono",monospace;color:#8E8C96}
+pre{font:400 20px/1.55 ui-monospace,"SF Mono",Menlo,monospace;padding:24px 30px;color:#D9D7DE;white-space:pre}
+.k{color:#C792EA}.t{color:#FF8A65}.a{color:#82AAFF}.s{color:#C3E88D}.p{color:#6F6D78}
+.light{position:absolute;background:#EDECEF;border-radius:20px;overflow:hidden;box-shadow:0 40px 80px #0008;color:#1E1E22}
+.arrow{position:absolute;display:flex;flex-direction:column;align-items:center;gap:14px}
+.arrow svg{filter:drop-shadow(0 8px 20px #FF4A2A66)}
+.arrow div{font-size:17px;color:#A9A7B0;white-space:nowrap}
+.foot{position:absolute;right:120px;bottom:56px;display:flex;align-items:center;gap:14px;font-size:20px;font-weight:600;color:#8E8C96}
+.foot img{width:36px;height:36px}
