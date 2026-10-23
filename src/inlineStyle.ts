@@ -85,6 +85,45 @@ export function parseLinearGradient(s: string): Gradient | null {
   };
 }
 
+const GENERIC_FAMILIES = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|math|emoji|fangsong|ui-[a-z-]+|-apple-system|BlinkMacSystemFont)$/i;
+
+/** CSS font stack → named families in order (`"Cooper BT", system-ui` → ["Cooper BT"]). */
+export function parseFontStack(s: string): string[] {
+  return s.split(',').map((f) => f.trim().replace(/^['"]|['"]$/g, '').trim())
+    .filter((f) => f && !GENERIC_FAMILIES.test(f));
+}
+
+/** `12px`, `50%`, `calc(50% - 7.5px)` → px plus a fraction of the reference size. */
+export function parseOffset(v: string | number, fontSize = 16): { px: number; pct: number } | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? { px: v, pct: 0 } : null;
+  let s = v.trim();
+  const calc = /^calc\((.*)\)$/i.exec(s);
+  if (calc) s = calc[1];
+  s = s.replace(/\s+/g, '');
+  const term = /([+-]?)(\d*\.?\d+)(px|%|rem|em)?/y;
+  let px = 0;
+  let pct = 0;
+  let terms = 0;
+  for (let i = 0; i < s.length; i = term.lastIndex) {
+    term.lastIndex = i;
+    const m = term.exec(s);
+    if (!m) return null;
+    const n = parseFloat(m[2]) * (m[1] === '-' ? -1 : 1);
+    if (m[3] === '%') pct += n / 100;
+    else px += n * (m[3] === 'rem' ? 16 : m[3] === 'em' ? fontSize : 1);
+    terms++;
+  }
+  if (terms === 0 || (terms > 1 && !calc)) return null;
+  return { px, pct };
+}
+
+/** `translate` value (`-50%`, `10px -50%`) → px plus a fraction of the node's own size. */
+export function parseTranslate(x: string, y = '0'): NonNullable<NormalizedStyle['translate']> | null {
+  const a = parseOffset(x);
+  const b = parseOffset(y);
+  return a && b ? { x: a.px, y: b.px, xPct: a.pct, yPct: b.pct } : null;
+}
+
 function toKebabless(k: string): string {
   return k.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
 }
@@ -151,8 +190,8 @@ export function inlineToStyle(obj: Record<string, string | number>): { style: No
       case 'fontSize': break;
       case 'display':
         if (sv === 'flex' || sv === 'block' || sv === 'none') style.display = sv;
-        else if (sv === 'inline-flex') style.display = 'flex';
-        else if (sv === 'inline-block' || sv === 'inline') style.display = 'block';
+        else if (sv === 'inline-flex') { style.display = 'flex'; style.inline = true; }
+        else if (sv === 'inline-block' || sv === 'inline') { style.display = 'block'; style.inline = true; }
         else unsupported.push(key);
         break;
       case 'flexDirection':
@@ -224,9 +263,19 @@ export function inlineToStyle(obj: Record<string, string | number>): { style: No
       case 'position':
         if (sv === 'absolute' || sv === 'relative') style.position = sv; else unsupported.push(key);
         break;
-      case 'top': case 'left': {
-        const n = px(key, v);
-        if (n !== undefined) style[key] = n;
+      case 'top': case 'left': case 'right': case 'bottom': {
+        if (sv === 'auto') break;
+        const o = parseOffset(v, fontSize);
+        if (!o) { unsupported.push(key); break; }
+        style[key] = o.px;
+        if (o.pct) (style.insetPct ??= {})[key] = o.pct;
+        break;
+      }
+      case 'translate': {
+        if (sv === 'none') break;
+        const parts = splitTop(sv);
+        const t = parts.length <= 2 ? parseTranslate(parts[0], parts[1]) : null;
+        if (t) style.translate = t; else unsupported.push(key);
         break;
       }
       case 'background': case 'backgroundColor': case 'backgroundImage': {
@@ -302,9 +351,18 @@ export function inlineToStyle(obj: Record<string, string | number>): { style: No
         break;
       }
       case 'transform': {
-        const m = /^rotate\(([^)]+)\)$/.exec(sv);
-        const a = m ? parseAngle(m[1]) : null;
-        if (a !== null) style.rotation = a; else if (sv !== 'none') unsupported.push(key);
+        if (sv === 'none') break;
+        let ok = true;
+        for (const fn of splitTop(sv)) {
+          const m = /^(rotate|translate|translateX|translateY)\((.*)\)$/.exec(fn);
+          const args = m ? splitTop(m[2], /,/).map((a) => a.trim()) : [];
+          if (m && m[1] === 'rotate' && parseAngle(args[0] ?? '') !== null) { style.rotation = parseAngle(args[0])!; continue; }
+          const t = !m ? null
+            : m[1] === 'translate' ? parseTranslate(args[0] ?? '', args[1])
+            : m[1] === 'translateX' ? parseTranslate(args[0] ?? '') : parseTranslate('0', args[0] ?? '');
+          if (t) style.translate = t; else ok = false;
+        }
+        if (!ok) unsupported.push(key);
         break;
       }
       case 'transformOrigin':
@@ -321,10 +379,16 @@ export function inlineToStyle(obj: Record<string, string | number>): { style: No
         break;
       }
       case 'overflow':
-        if (sv === 'hidden' || sv === 'clip') style.overflowHidden = true;
+        style.overflowHidden = sv === 'hidden' || sv === 'clip';
         break;
       case 'color': { const c = color(key, v); if (c) style.color = c; break; }
-      case 'fontFamily': style.fontFamily = sv.split(',')[0].trim().replace(/^['"]|['"]$/g, ''); break;
+      case 'fontFamily': {
+        const stack = parseFontStack(sv);
+        if (!stack.length) break;
+        style.fontFamily = stack[0];
+        style.fontFallbacks = stack.slice(1);
+        break;
+      }
       case 'fontWeight': {
         const n = sv === 'bold' ? 700 : sv === 'normal' ? 400 : Number(sv);
         if (Number.isFinite(n)) style.fontWeight = n; else unsupported.push(key);
@@ -337,6 +401,7 @@ export function inlineToStyle(obj: Record<string, string | number>): { style: No
         if (sv === 'normal') { style.lineHeight = 'auto'; break; }
         // unitless number multiplies font size
         if (typeof v === 'number' || /^\d*\.?\d+$/.test(sv)) { style.lineHeight = Number(v) * fontSize; break; }
+        if (/^\d*\.?\d+%$/.test(sv)) { style.lineHeight = (parseFloat(sv) / 100) * fontSize; break; }
         const n = px(key, v);
         if (n !== undefined) style.lineHeight = n;
         break;

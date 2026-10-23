@@ -63,6 +63,7 @@ describe('tailwindToStyle', () => {
   it('opacity, overflow, position', () => {
     expect(tw('opacity-50').style.opacity).toBe(0.5);
     expect(tw('overflow-hidden').style.overflowHidden).toBe(true);
+    expect(tw('overflow-visible').style.overflowHidden).toBe(false);
     expect(tw('absolute top-2 left-4').style).toMatchObject({ position: 'absolute', top: 8, left: 16 });
     expect(tw('relative -top-2').style).toMatchObject({ position: 'relative', top: -8 });
   });
@@ -144,5 +145,18 @@ describe('tailwindToStyle', () => {
     expect(style.gradient?.angle).toBe(90);
     expect(style.gradient?.stops).toHaveLength(2);
     expect(tw('bg-[linear-gradient(160deg,#fff_0%,#000_100%)]').style.gradient?.angle).toBe(160);
+  });
+});
+
+describe('insets and translate', () => {
+  it('reads fractions, arbitrary calc and negative translate', () => {
+    const { style, unsupported } = tw('absolute left-1/2 top-[calc(50%-8px)] right-4 -translate-x-1/2 leading-[100%] text-[20px]');
+    expect(unsupported).toEqual([]);
+    expect(style.left).toBe(0);
+    expect(style.top).toBe(-8);
+    expect(style.right).toBe(16);
+    expect(style.insetPct).toEqual({ left: 0.5, top: 0.5 });
+    expect(style.translate).toEqual({ x: 0, y: 0, xPct: -0.5, yPct: 0 });
+    expect(style.lineHeight).toBe(20);
   });
 });

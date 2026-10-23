@@ -14,14 +14,14 @@
   }
 
   /* Header — where am I, what does this do */
-  header { padding: 16px 16px 12px; }
+  header { padding: 12px 12px 8px; }
   h1 { margin: 0; font-size: 13px; line-height: 20px; font-weight: 600; letter-spacing: -0.005em; }
   .sub { margin: 2px 0 0; color: var(--figma-color-text-secondary, #757575); }
 
   /* Editor */
-  .editor { position: relative; flex: 1; display: flex; padding: 0 16px; min-height: 0; }
+  .editor { position: relative; flex: 1; display: flex; padding: 0 12px; min-height: 0; }
   textarea {
-    flex: 1; width: 100%; resize: none; padding: 12px;
+    flex: 1; width: 100%; resize: none; padding: 10px;
     font: 12px/18px "SF Mono", ui-monospace, Menlo, Consolas, monospace; tab-size: 2; white-space: pre; overflow-wrap: normal; overflow: auto;
     color: var(--figma-color-text, #1e1e1e);
     background: var(--figma-color-bg-secondary, #f5f5f5);
@@ -37,8 +37,8 @@
 
   /* Empty state sits on top of the editor; clicks pass through to the textarea */
   .empty {
-    position: absolute; inset: 0 16px; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 12px; padding: 24px;
+    position: absolute; inset: 0 12px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px; padding: 16px;
     text-align: center; pointer-events: none;
     color: var(--figma-color-text-secondary, #757575);
     transition: opacity 150ms ease-out;
@@ -48,7 +48,7 @@
   .editor.has-code .empty { opacity: 0; visibility: hidden; }
 
   /* Status + warnings */
-  .meta { padding: 8px 16px 0; display: flex; flex-direction: column; gap: 6px; }
+  .meta { padding: 8px 12px 0; display: flex; flex-direction: column; gap: 6px; }
   #status { display: flex; align-items: center; gap: 6px; min-height: 16px; color: var(--figma-color-text-secondary, #757575); }
   #status .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: currentColor; }
   #status .msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -67,11 +67,11 @@
   summary::-webkit-details-marker { display: none; }
   summary::before { content: "›"; display: inline-block; width: 10px; transition: transform 150ms ease-out; }
   details[open] summary::before { transform: rotate(90deg); }
-  ul { margin: 0; padding: 0 10px 8px 20px; max-height: 112px; overflow: auto; color: var(--figma-color-text, #1e1e1e); }
+  ul { margin: 0; padding: 0 10px 8px 20px; max-height: 80px; overflow: auto; color: var(--figma-color-text, #1e1e1e); }
   li + li { margin-top: 2px; }
 
   /* Footer */
-  footer { display: flex; align-items: center; gap: 8px; padding: 12px 16px 16px; }
+  footer { display: flex; align-items: center; gap: 8px; padding: 10px 12px 12px; }
   .spacer { flex: 1; }
   .link {
     padding: 0; border: 0; background: none; cursor: default; font: inherit; font-weight: 500;

@@ -1,5 +1,6 @@
 import * as esbuild from 'esbuild';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { watch as watchFile } from 'node:fs';
 
 const watch = process.argv.includes('--watch');
 
@@ -43,6 +44,8 @@ if (watch) {
   const a = await esbuild.context(codeOpts);
   const b = await esbuild.context(uiOpts);
   await Promise.all([a.watch(), b.watch()]);
+  // ui.html isn't imported by any entry point, so esbuild doesn't see edits to it.
+  watchFile('src/ui.html', () => b.rebuild().catch(() => {}));
 } else {
   await Promise.all([esbuild.build(codeOpts), esbuild.build(uiOpts)]);
 }

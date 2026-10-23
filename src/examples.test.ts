@@ -21,7 +21,7 @@ describe('examples', () => {
 });
 
 describe('Paper exports convert without warnings', () => {
-  for (const f of ['paper-tailwind.tsx', 'paper-inline.tsx']) {
+  for (const f of ['paper-tailwind.tsx', 'paper-inline.tsx', 'paper-banner-tailwind.tsx', 'paper-absolute.tsx', 'paper-centered-root.tsx']) {
     it(f, () => expect(convert(readFileSync(join(dir, f), 'utf8')).warnings).toEqual([]));
   }
 });

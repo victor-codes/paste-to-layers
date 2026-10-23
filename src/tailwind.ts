@@ -1,6 +1,6 @@
 import type { NormalizedStyle, RGBA } from './types';
 import { parseCssColor, tailwindColor, withAlpha } from './colors';
-import { inlineToStyle, parseLinearGradient } from './inlineStyle';
+import { inlineToStyle, parseFontStack, parseLinearGradient, parseOffset } from './inlineStyle';
 
 const TEXT_SIZES: Record<string, [number, number]> = {
   xs: [12, 16], sm: [14, 20], base: [16, 24], lg: [18, 28], xl: [20, 28],
@@ -28,7 +28,7 @@ const SHADOWS: Record<string, Shadow | null> = {
 };
 const GRADIENT_DIRS: Record<string, number> = { t: 0, tr: 45, r: 90, br: 135, b: 180, bl: 225, l: 270, tl: 315 };
 /** Classes with no visual effect in Figma (rendering hints, box model, wrapping, interaction). */
-const IGNORED = /^(antialiased|subpixel-antialiased|shrink(-0)?|flex-shrink(-0)?|grow-0|flex-grow-0|box-(border|content)|wrap-(anywhere|break-word|normal)|break-(words|all|normal|keep)|origin-.+|border-(solid|dashed|dotted|double|none)|cursor-.+|select-.+|pointer-events-.+|transition(-.+)?|duration-.+|ease-.+|delay-.+|will-change-.+|isolate|outline-none|whitespace-normal|overflow-visible|list-none|static)$/;
+const IGNORED = /^(antialiased|subpixel-antialiased|shrink(-0)?|flex-shrink(-0)?|grow-0|flex-grow-0|box-(border|content)|wrap-(anywhere|break-word|normal)|break-(words|all|normal|keep)|origin-.+|border-(solid|dashed|dotted|double|none)|cursor-.+|select-.+|pointer-events-.+|transition(-.+)?|duration-.+|ease-.+|delay-.+|will-change-.+|isolate|outline-none|whitespace-normal|list-none|static)$/;
 
 const DEFAULT_BORDER_COLOR: RGBA = { r: 0xe5 / 255, g: 0xe7 / 255, b: 0xeb / 255, a: 1 };
 
@@ -122,18 +122,31 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
 
   function apply(tok: string, neg: boolean): boolean {
     let m: RegExpExecArray | null;
+    // Inset/translate value: spacing scale, fraction (`1/2`), `full`, or arbitrary (`[calc(50%-8px)]`).
+    const offset = (v: string): { px: number; pct: number } | null => {
+      const sign = neg ? -1 : 1;
+      let o: { px: number; pct: number } | null = null;
+      const frac = /^(\d+)\/(\d+)$/.exec(v);
+      if (frac) o = { px: 0, pct: Number(frac[1]) / Number(frac[2]) };
+      else if (v === 'full') o = { px: 0, pct: 1 };
+      else if (/^\[.+\]$/.test(v)) o = parseOffset(v.slice(1, -1).replace(/_/g, ' '));
+      else { const n = length(v); if (n !== null) o = { px: n, pct: 0 }; }
+      return o && { px: sign * o.px || 0, pct: sign * o.pct || 0 };
+    };
     const num = (v: string): number | null => {
       const n = length(v);
       return n === null ? null : neg ? -n : n;
     };
-    if (neg && !/^(top|left|rotate|tracking)-/.test(tok)) return false;
+    if (neg && !/^(top|left|right|bottom|translate-[xy]|rotate|tracking)-/.test(tok)) return false;
 
     // arbitrary property: [prop:value]
     if ((m = /^\[([a-z-]+):(.+)\]$/.exec(tok))) return arbitraryProperty(m[1], m[2].replace(/_/g, ' '));
 
     switch (tok) {
-      case 'flex': case 'inline-flex': style.display = 'flex'; return true;
+      case 'flex': style.display = 'flex'; return true;
+      case 'inline-flex': style.display = 'flex'; style.inline = true; return true;
       case 'block': style.display = 'block'; return true;
+      case 'inline-block': case 'inline': style.display = 'block'; style.inline = true; return true;
       case 'hidden': style.display = 'none'; return true;
       case 'flex-row': style.direction = 'row'; return true;
       case 'flex-col': style.direction = 'column'; return true;
@@ -143,6 +156,7 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
       case 'self-stretch': style.heightSizing = 'FILL'; return true;
       case 'relative': case 'absolute': style.position = tok; return true;
       case 'overflow-hidden': case 'overflow-clip': style.overflowHidden = true; return true;
+      case 'overflow-visible': style.overflowHidden = false; return true;
       case 'whitespace-nowrap': case 'whitespace-pre':
         if (style.width === undefined) style.widthSizing ??= 'HUG';
         return true;
@@ -197,10 +211,20 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
       if (n === null) return false;
       style.maxWidth = n; return true;
     }
-    if ((m = /^(top|left)-(.+)$/.exec(tok))) {
-      const n = num(m[2]);
-      if (n === null) return false;
-      style[m[1] as 'top' | 'left'] = n; return true;
+    if ((m = /^(top|left|right|bottom)-(.+)$/.exec(tok))) {
+      const o = offset(m[2]);
+      if (!o) return false;
+      const side = m[1] as 'top' | 'left' | 'right' | 'bottom';
+      style[side] = o.px;
+      if (o.pct) (style.insetPct ??= {})[side] = o.pct;
+      return true;
+    }
+    if ((m = /^translate-([xy])-(.+)$/.exec(tok))) {
+      const o = offset(m[2]);
+      if (!o) return false;
+      const t = (style.translate ??= { x: 0, y: 0, xPct: 0, yPct: 0 });
+      if (m[1] === 'x') { t.x = o.px; t.xPct = o.pct; } else { t.y = o.px; t.yPct = o.pct; }
+      return true;
     }
 
     // radius
@@ -304,17 +328,20 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
     // font-*
     if ((m = /^font-(.+)$/.exec(tok))) {
       if (m[1] in FONT_WEIGHTS) { style.fontWeight = FONT_WEIGHTS[m[1]]; return true; }
-      if (m[1] in FONT_FAMILIES) { style.fontFamily = FONT_FAMILIES[m[1]]; return true; }
+      if (m[1] in FONT_FAMILIES) { style.fontFamily = FONT_FAMILIES[m[1]]; style.fontFallbacks = []; return true; }
       const arb = /^\[(.+)\]$/.exec(m[1]);
       if (!arb) return false;
       if (/^\d+$/.test(arb[1])) { style.fontWeight = Number(arb[1]); return true; }
-      const family = arb[1].replace(/^(family-name|generic-name):/, '').split(',')[0]
-        .replace(/_/g, ' ').trim().replace(/^['"]|['"]$/g, '');
-      if (!family) return false;
-      style.fontFamily = family; return true;
+      const stack = parseFontStack(arb[1].replace(/^(family-name|generic-name):/, '').replace(/_/g, ' '));
+      if (!stack.length) return false;
+      style.fontFamily = stack[0];
+      style.fontFallbacks = stack.slice(1);
+      return true;
     }
     if ((m = /^leading-(.+)$/.exec(tok))) {
       if (m[1] in LEADING) { leading = { mult: LEADING[m[1]] }; return true; }
+      const pct = /^\[(\d*\.?\d+)%\]$/.exec(m[1]);
+      if (pct) { leading = { mult: parseFloat(pct[1]) / 100 }; return true; }
       const n = length(m[1]);
       if (n === null) return false;
       leading = { px: n }; return true;

@@ -28,7 +28,8 @@ function fontStyleName(weight: number | undefined, italic: boolean): string {
 
 function wantedFont(style: NormalizedStyle): FontName {
   return {
-    family: style.fontFamily || DEFAULT_FAMILY,
+    // The whole stack travels in `family` so the cache key covers fallbacks; resolveFont splits it.
+    family: [style.fontFamily || DEFAULT_FAMILY, ...(style.fontFallbacks || [])].join(', '),
     style: fontStyleName(style.fontWeight, style.fontStyle === 'italic'),
   };
 }
@@ -46,24 +47,101 @@ async function tryLoad(f: FontName): Promise<boolean> {
   }
 }
 
+// Longer names first so "extralight" isn't read as "light".
+const STYLE_WEIGHTS: [RegExp, number][] = [
+  [/^(thin|hairline)$/, 100],
+  [/^(extralight|ultralight)$/, 200],
+  [/^light$/, 300],
+  [/^(regular|normal|book|roman|)$/, 400],
+  [/^medium$/, 500],
+  [/^(semibold|demibold)$/, 600],
+  [/^bold$/, 700],
+  [/^(extrabold|ultrabold)$/, 800],
+  [/^(black|heavy)$/, 900],
+];
+
+/** "Extra Bold Italic" / "ExtraBold" / "Extrabold" → { weight: 800, italic }; null for styles like "Condensed Bold". */
+export function parseStyleName(style: string): { weight: number; italic: boolean } | null {
+  let n = style.toLowerCase().replace(/[\s_-]+/g, '');
+  const italic = /(italic|oblique)$/.test(n);
+  n = n.replace(/(italic|oblique)$/, '');
+  for (const [re, w] of STYLE_WEIGHTS) if (re.test(n)) return { weight: w, italic };
+  return null;
+}
+
+let familyIndex: Map<string, { family: string; styles: string[] }> | null = null;
+
+/** "Cooper BT" and "CooperBT" name the same family. */
+const familyKey = (family: string) => family.toLowerCase().replace(/[\s_-]+/g, '');
+
+/**
+ * Installed family for a CSS name. Fonts name the same weight differently ("Semi Bold" vs "SemiBold"),
+ * and CSS sometimes uses the PostScript name ("CooperBT-Medium"), so that's tried without its style suffix.
+ */
+async function familyInfo(family: string): Promise<{ family: string; styles: string[] } | null> {
+  if (!familyIndex) {
+    familyIndex = new Map();
+    try {
+      for (const f of await figma.listAvailableFontsAsync()) {
+        const key = familyKey(f.fontName.family);
+        let entry = familyIndex.get(key);
+        if (!entry) familyIndex.set(key, (entry = { family: f.fontName.family, styles: [] }));
+        entry.styles.push(f.fontName.style);
+      }
+    } catch (e) {
+      /* fall back to loading the requested names directly */
+    }
+  }
+  const dash = family.lastIndexOf('-');
+  return familyIndex.get(familyKey(family)) ??
+    (dash > 0 ? familyIndex.get(familyKey(family.slice(0, dash))) ?? null : null);
+}
+
+/** The family's style closest to the requested weight, preferring a matching italic. */
+export function closestStyle(styles: string[], weight: number, italic: boolean): string | null {
+  let best: string | null = null;
+  let bestScore = Infinity;
+  for (const st of styles) {
+    const p = parseStyleName(st);
+    if (!p) continue;
+    // Like CSS, lean heavier for bold requests and lighter for light ones on ties.
+    const tie = (p.weight > weight) === (weight >= 500) ? 0 : 1;
+    const score = (p.italic === italic ? 0 : 10000) + Math.abs(p.weight - weight) * 2 + tie;
+    if (score < bestScore) { bestScore = score; best = st; }
+  }
+  return best;
+}
+
+async function loadClosest(family: string, weight: number, italic: boolean): Promise<FontName | null> {
+  const info = await familyInfo(family);
+  if (!info) {
+    const direct = { family, style: fontStyleName(weight, italic) };
+    return (await tryLoad(direct)) ? direct : null;
+  }
+  const style = closestStyle(info.styles, weight, italic);
+  const f = style ? { family: info.family, style } : null;
+  return f && (await tryLoad(f)) ? f : null;
+}
+
 async function resolveFont(f: FontName): Promise<FontName> {
   const key = fontKey(f);
   const cached = fontCache.get(key);
   if (cached) return cached;
+  const want = parseStyleName(f.style) ?? { weight: 400, italic: false };
+  const stack = f.family.split(', ');
   let result: FontName | null = null;
-  if (await tryLoad(f)) result = f;
-  else {
-    const inter = { family: DEFAULT_FAMILY, style: f.style };
-    if (await tryLoad(inter)) result = inter;
-    else {
-      const reg = { family: DEFAULT_FAMILY, style: 'Regular' };
-      if (await tryLoad(reg)) result = reg;
-    }
-    if (result) {
-      renderWarnings.push('Font "' + f.family + ' ' + f.style + '" unavailable; used "' + result.family + ' ' + result.style + '".');
-    }
+  for (const family of stack) if (!result) result = await loadClosest(family, want.weight, want.italic);
+  if (!result && !stack.includes(DEFAULT_FAMILY)) result = await loadClosest(DEFAULT_FAMILY, want.weight, want.italic);
+  if (!result) {
+    const reg = { family: DEFAULT_FAMILY, style: 'Regular' };
+    if (await tryLoad(reg)) result = reg;
   }
   if (!result) throw new Error('Could not load any font (tried ' + f.family + ' ' + f.style + ' and Inter).');
+  const got = parseStyleName(result.style);
+  const fromStack = (await Promise.all(stack.map(familyInfo))).some((i) => i?.family === result!.family);
+  if (!fromStack || !got || got.weight !== want.weight || got.italic !== want.italic) {
+    renderWarnings.push('Font "' + stack[0] + ' ' + f.style + '" unavailable; used "' + result.family + ' ' + result.style + '".');
+  }
   fontCache.set(key, result);
   return result;
 }
@@ -139,6 +217,11 @@ function applyBox(node: FrameNode | RectangleNode, s: NormalizedStyle): void {
     node.strokeAlign = 'INSIDE';
   }
   if (s.shadows && s.shadows.length) {
+    // Figma only accepts spread on frames that clip content and have a visible fill.
+    if (node.type === 'FRAME' && s.shadows.some((sh) => sh.spread !== 0)) {
+      if (s.background || s.gradient) node.clipsContent = true;
+      else renderWarnings.push('Shadow spread on "' + node.name + '" needs a background in Figma; it may be ignored.');
+    }
     node.effects = s.shadows.map(
       (sh): DropShadowEffect => ({
         type: 'DROP_SHADOW',
@@ -173,6 +256,23 @@ async function applySpan(t: TextNode, start: number, end: number, sp: Normalized
 interface ParentCtx {
   frame: FrameNode;
   style: NormalizedStyle;
+  // Whether the frame's size on each axis is known up front (fixed, or filled from a known size).
+  definiteW: boolean;
+  definiteH: boolean;
+}
+
+/**
+ * Which axes the parent stretches this child across. CSS stretches by default (`align-items: normal`,
+ * block-level boxes in block flow); that's only mirrored when the parent's size is known, since a FILL
+ * child can't size a hugging parent the way CSS shrink-to-fit does.
+ */
+function crossStretch(parent: ParentCtx, s: NormalizedStyle): { h: boolean; v: boolean } {
+  const p = parent.style;
+  const column = p.direction === 'column';
+  if (p.align === 'stretch') return { h: column, v: !column && p.display !== 'block' };
+  if (p.align !== undefined) return { h: false, v: false };
+  if (p.display !== 'flex') return { h: column && !s.inline && parent.definiteW, v: false };
+  return column ? { h: parent.definiteW, v: false } : { h: false, v: parent.definiteH };
 }
 
 function safe(fn: () => void): void {
@@ -189,7 +289,7 @@ function setSizing(
   parent: ParentCtx | null,
   absolute: boolean,
   defaults: { h: Sizing; v: Sizing }
-): void {
+): { h: Sizing; v: Sizing } {
   const inAuto = !!parent && !absolute;
   const resolve = (sz: Sizing | undefined, dim: number | undefined, def: Sizing): Sizing => {
     let r: Sizing = sz ?? (dim !== undefined ? 'FIXED' : def);
@@ -205,11 +305,13 @@ function setSizing(
       v === 'FIXED' && s.height !== undefined ? Math.max(0.01, s.height) : node.height
     );
   }
-  const stretchH = inAuto && parent!.style.direction === 'column' && parent!.style.align === 'stretch' && h !== 'FIXED';
-  const stretchV = inAuto && parent!.style.direction !== 'column' && parent!.style.display !== 'block' && parent!.style.align === 'stretch' && v !== 'FIXED';
+  const st = inAuto ? crossStretch(parent!, s) : { h: false, v: false };
+  const stretchH = st.h && h !== 'FIXED';
+  const stretchV = st.v && v !== 'FIXED';
   if (stretchH || stretchV) safe(() => { node.layoutAlign = 'STRETCH'; });
   safe(() => { node.layoutSizingHorizontal = stretchH ? 'FILL' : h; });
   safe(() => { node.layoutSizingVertical = stretchV ? 'FILL' : v; });
+  return { h: stretchH ? 'FILL' : h, v: stretchV ? 'FILL' : v };
 }
 
 async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | null> {
@@ -218,6 +320,7 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
   const absolute = !!parent && s.position === 'absolute';
 
   let node: SceneNode;
+  let sizing: { h: Sizing; v: Sizing } = { h: 'HUG', v: 'HUG' };
 
   if (ir.kind === 'frame') {
     const f = figma.createFrame();
@@ -290,6 +393,8 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
     node = created;
     count++;
     node.name = ir.name;
+    // Inline <svg> clips to its box unless `overflow: visible` (Paper strokes often sit outside the viewBox).
+    if (node.type === 'FRAME') (node as FrameNode).clipsContent = s.overflowHidden ?? true;
     if ('opacity' in node && s.opacity !== undefined) (node as BlendMixin).opacity = s.opacity;
   }
 
@@ -302,10 +407,9 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
   // Sizing
   if (ir.kind === 'text') {
     const t = node as TextNode;
-    const parentWide =
-      !!parent && parent.style.direction === 'column' || (!!parent && parent.style.direction === undefined);
-    const parentFixedW = !!parent && (parent.style.widthSizing === 'FILL' || parent.style.widthSizing === 'FIXED' || parent.style.width !== undefined);
-    const fill = !absolute && !!parent && (s.widthSizing === 'FILL' || (s.widthSizing === undefined && s.width === undefined && parentWide && parentFixedW));
+    const inFlow = !absolute && !!parent;
+    const stretched = inFlow && parent!.style.direction !== 'row' && parent!.definiteW && crossStretch(parent!, s).h;
+    const fill = inFlow && (s.widthSizing === 'FILL' || (s.widthSizing === undefined && s.width === undefined && stretched));
     if (fill) {
       t.textAutoResize = 'HEIGHT';
       safe(() => { t.layoutSizingHorizontal = 'FILL'; });
@@ -330,8 +434,17 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
         t.resize(s.maxWidth, t.height);
       }
     }
+    // Unstretched text (e.g. in an items-center column) still wraps at the parent's content width.
+    if (inFlow && !fill && t.textAutoResize === 'WIDTH_AND_HEIGHT' && s.widthSizing !== 'HUG' &&
+        parent!.definiteW && parent!.style.direction !== 'row') {
+      const inner = parent!.frame.width - parent!.frame.paddingLeft - parent!.frame.paddingRight;
+      if (inner > 0 && t.width > inner) {
+        t.textAutoResize = 'HEIGHT';
+        t.resize(inner, t.height);
+      }
+    }
   } else if (ir.kind === 'frame') {
-    setSizing(node as FrameNode, s, parent, absolute, { h: 'HUG', v: 'HUG' });
+    sizing = setSizing(node as FrameNode, s, parent, absolute, { h: 'HUG', v: 'HUG' });
     const f = node as FrameNode;
     if (s.minWidth !== undefined) safe(() => { f.minWidth = s.minWidth!; });
     if (s.maxWidth !== undefined) safe(() => { f.maxWidth = s.maxWidth!; });
@@ -339,14 +452,25 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
     setSizing(node as FrameNode, s, parent, absolute, { h: 'FIXED', v: 'FIXED' });
   }
 
-  if (absolute) {
-    node.x = s.left ?? 0;
-    node.y = s.top ?? 0;
-  }
 
   if (ir.kind === 'frame') {
-    const ctx: ParentCtx = { frame: node as FrameNode, style: s };
-    for (const child of ir.children) await build(child, ctx);
+    const definite = (mode: Sizing, parentDefinite: boolean | undefined) =>
+      mode === 'FIXED' || (mode === 'FILL' && !!parentDefinite && !absolute);
+    const ctx: ParentCtx = {
+      frame: node as FrameNode,
+      style: s,
+      definiteW: definite(sizing.h, parent?.definiteW),
+      definiteH: definite(sizing.v, parent?.definiteH),
+    };
+    const f = node as FrameNode;
+    const placed: [SceneNode, NormalizedStyle][] = [];
+    for (const child of ir.children) {
+      const n = await build(child, ctx);
+      if (n && child.style.position === 'absolute') placed.push([n, child.style]);
+    }
+    if (placed.length && placed.length === f.children.length) fitToAbsolute(f, s, sizing, placed);
+    // Insets like `calc(50% - 8px)` and `right` need the parent's final size.
+    for (const [n, cs] of placed) placeAbsolute(n, cs, f);
   }
 
   // Both need the final size, so they run once children have been laid out.
@@ -355,9 +479,58 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
     const base = s.background ? [solid(s.background)] : [];
     f.fills = [...base, linearGradient(s.gradient, f.width, f.height)];
   }
-  applyRotation(node, s, absolute);
+  if (!absolute) applyRotation(node, s, false);
 
   return node;
+}
+
+/** CSS absolute position (left/top/right/bottom, % insets, translate) → x/y, then rotation. */
+function placeAbsolute(node: SceneNode, s: NormalizedStyle, parent: FrameNode): void {
+  const pct = s.insetPct || {};
+  const W = parent.width;
+  const H = parent.height;
+  let x = s.left !== undefined ? s.left + (pct.left ?? 0) * W
+    : s.right !== undefined ? W - node.width - s.right - (pct.right ?? 0) * W : 0;
+  let y = s.top !== undefined ? s.top + (pct.top ?? 0) * H
+    : s.bottom !== undefined ? H - node.height - s.bottom - (pct.bottom ?? 0) * H : 0;
+  if (s.translate) {
+    x += s.translate.x + s.translate.xPct * node.width;
+    y += s.translate.y + s.translate.yPct * node.height;
+  }
+  node.x = x;
+  node.y = y;
+  applyRotation(node, s, true);
+}
+
+/**
+ * A frame with no size whose children are all absolute would collapse in Figma (in CSS it does too,
+ * but exports often drop the root's size). Size it to the children's furthest px-positioned edges.
+ */
+function fitToAbsolute(f: FrameNode, s: NormalizedStyle, sizing: { h: Sizing; v: Sizing }, placed: [SceneNode, NormalizedStyle][]): void {
+  const fitW = s.width === undefined && sizing.h === 'HUG';
+  const fitH = s.height === undefined && sizing.v === 'HUG';
+  if (!fitW && !fitH) return;
+  let w = 0;
+  let h = 0;
+  for (const [n, cs] of placed) {
+    if (cs.left !== undefined) w = Math.max(w, fitExtent(cs.left, cs.insetPct?.left ?? 0, cs.translate?.x ?? 0, cs.translate?.xPct ?? 0, n.width));
+    if (cs.top !== undefined) h = Math.max(h, fitExtent(cs.top, cs.insetPct?.top ?? 0, cs.translate?.y ?? 0, cs.translate?.yPct ?? 0, n.height));
+  }
+  if ((fitW && w > 0) || (fitH && h > 0)) f.resize(fitW && w > 0 ? w : f.width, fitH && h > 0 ? h : f.height);
+  renderWarnings.push('"' + f.name + '" has no width/height and only absolutely positioned children, so its size was guessed. Add width and height to it for an exact match.');
+}
+
+/**
+ * Smallest parent size that keeps a child inside it on one axis. The child's near edge sits at
+ * `pct * size + offset` (offset = inset px + translate px + translate% of the child), so a centred child
+ * (`calc(50% + 0px)` with `translate: -50%`) needs the parent to be at least as big as itself.
+ */
+export function fitExtent(inset: number, pct: number, tPx: number, tPct: number, size: number): number {
+  const offset = inset + tPx + tPct * size;
+  let need = 0;
+  if (pct < 1) need = Math.max(need, (offset + size) / (1 - pct)); // far edge stays inside
+  if (pct > 0 && offset < 0) need = Math.max(need, -offset / pct); // near edge stays inside
+  return need;
 }
 
 export async function render(root: IRNode): Promise<{ node: SceneNode; count: number }> {

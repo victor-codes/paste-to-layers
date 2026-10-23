@@ -18,21 +18,62 @@ Figma desktop: Plugins → Development → Import plugin from manifest → selec
 ## Supported
 
 - Elements: div/section/nav/ul/li/button/etc. as frames, text elements as text layers, inline `<svg>` as vector, `<img>` as placeholder
-- Tailwind: flex layout, gap, padding, sizing (incl. arbitrary values like `w-[960px]`), colors, radius, borders, shadows, opacity, typography, rotation, linear gradients
+- Tailwind: flex layout, gap, padding, sizing (incl. arbitrary values like `w-[960px]`), colors, radius, borders, shadows, opacity, typography, rotation, translate, linear gradients
 - Tailwind v4 syntax: `text-sm/6`, `size-*`, `font-['Inter_Tight']`, `tracking-[-0.02em]`, arbitrary properties like `[border-width:1.5px]`
 - JSX copied from Paper (Tailwind or inline styles)
-- Inline `style` objects (camelCase properties, px/rem values, hex/rgb colors)
+- Inline `style` objects (camelCase properties, px/rem/em values, `%` line height, hex/rgb colors)
+- Absolute positioning with px, `%` and `calc(% ± px)` insets on `left`/`top`/`right`/`bottom`, plus `translate` (`left-1/2 -translate-x-1/2`)
+- CSS default stretching: children of a flex column (or block parent) with a known width fill it, as in the browser
+- Font stacks: each family in `font-family` is tried in order, and weight names are matched however the font spells them (`SemiBold`, `Semi Bold`); PostScript names like `CooperBT-Medium` resolve to their family
+- Mixed inline content (`<p>text <b>bold</b></p>`) becomes one text layer with styled ranges (weight, italic, color, size, decoration, case). An inline child with its own box (background, padding, border) or layout still splits the text into separate layers
 - Class helpers (`clsx`, `cn`, etc.) with static strings
 - Default export, named components, or arrow components
 
 See `examples/` for samples.
 
-## Known limitations
+## Not supported
 
-- No runtime props, state, or hooks; only static markup is read
-- Variants (`hover:`, `md:`, `dark:`) are skipped with warnings
+Most of these show an "Unsupported…" warning after converting; the last group is dropped silently.
+
+### Layout
+
+- Grid (`display: grid`, `grid-cols-*`); renders as a vertical stack
+- Margin (`m-*`, `mx-auto`, `margin`); use `gap` and padding
+- `space-x-*` / `space-y-*`
+- `justify-around` / `justify-evenly`; `align-self` other than `self-stretch`
+- `min-height`, `max-height`, `aspect-ratio`
+- Percentage sizes other than `100%` (`w-1/2`, `calc(100% - 20px)`); percentages work for positioning only
+- `z-index`; stacking follows source order
+- Text in a row doesn't shrink and wrap like the browser's `flex-shrink`, so it can overflow
+- A root with no width/height whose children are all absolute gets a guessed size (with a warning); add a size to the root for an exact match
+
+### Visuals
+
+- Background images (`url(...)`) and radial/conic gradients
+- `<img>` content (rendered as a gray placeholder)
+- Per-side borders (`border-t`, `borderTop`) and `divide-*`
+- Dashed/dotted borders (rendered solid)
+- Inset shadows and `text-shadow`
+- Shadow spread on a frame without a background (Figma needs a fill and clipping for spread)
+- `filter`, `blur`, `backdrop-blur`, `mix-blend-mode`
+- `scale` and `skew` transforms
+- `line-clamp`, `truncate`, `text-ellipsis`
+
+### Tailwind
+
+- Variants (`hover:`, `md:`, `dark:`)
+- Custom theme values from a project's Tailwind config; only the default scale and arbitrary `[...]` values are recognized
+
+### React
+
+- Runtime props, state, hooks and conditionals; only static markup is read
 - A `.map` renders only one item
-- Images become gray placeholders
-- Only linear gradients are supported (radial/conic and background images are skipped)
-- Rotation is supported; other transforms (scale, skew, translate) are not
-- Mixed inline content (`<p>text <b>bold</b></p>`) becomes one text layer with styled ranges (weight, italic, color, size, decoration, case). An inline child with its own box (background, padding, border) or layout still splits the text into separate layers
+- Custom components (`<Button>`) render as plain frames with a warning
+
+### Fonts
+
+- Fonts not installed in Figma fall back to the next family in the stack, then Inter, with a warning
+
+### Ignored silently
+
+- `flex-shrink`, `cursor`, transitions, `will-change`, font smoothing and other interaction or rendering hints with no visual effect in Figma

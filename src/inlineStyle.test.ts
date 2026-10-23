@@ -69,6 +69,9 @@ describe('inlineToStyle', () => {
     expect(style.overflowHidden).toBe(true);
     expect(style.display).toBe('block');
   });
+  it('reads overflow: visible as not clipping', () => {
+    expect(inlineToStyle({ overflow: 'visible' }).style.overflowHidden).toBe(false);
+  });
   it('parses linear gradients', () => {
     const { style, unsupported } = inlineToStyle({
       backgroundImage: 'linear-gradient(in oklab 160deg, #c8d3c0 0%, #8fa68a 100%)',
@@ -81,5 +84,32 @@ describe('inlineToStyle', () => {
   });
   it('treats 50% radius as a circle', () => {
     expect(inlineToStyle({ borderRadius: '50%' }).style.radius).toBe(9999);
+  });
+});
+
+describe('positioning and fonts from Paper exports', () => {
+  it('reads calc/percent insets, translate and % line-height', () => {
+    const { style, unsupported } = inlineToStyle({
+      position: 'absolute', left: 'calc(50% - 7.5px)', top: '399px', translate: '-50%', fontSize: '60px', lineHeight: '100%',
+    });
+    expect(unsupported).toEqual([]);
+    expect(style.left).toBe(-7.5);
+    expect(style.insetPct).toEqual({ left: 0.5 });
+    expect(style.top).toBe(399);
+    expect(style.translate).toEqual({ x: 0, y: 0, xPct: -0.5, yPct: 0 });
+    expect(style.lineHeight).toBe(60);
+  });
+
+  it('reads transform translate with rotate', () => {
+    const { style, unsupported } = inlineToStyle({ transform: 'translate(-50%, -50%) rotate(45deg)' });
+    expect(unsupported).toEqual([]);
+    expect(style.translate).toEqual({ x: 0, y: 0, xPct: -0.5, yPct: -0.5 });
+    expect(style.rotation).toBe(45);
+  });
+
+  it('keeps the font stack minus generic families', () => {
+    const { style } = inlineToStyle({ fontFamily: '"CooperBT-Medium", "Cooper BT", system-ui, sans-serif' });
+    expect(style.fontFamily).toBe('CooperBT-Medium');
+    expect(style.fontFallbacks).toEqual(['Cooper BT']);
   });
 });

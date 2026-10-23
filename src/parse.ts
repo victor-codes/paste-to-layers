@@ -8,7 +8,7 @@ type N = any;
 type Dir = 'row' | 'column';
 
 const TEXT_KEYS = [
-  'color', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle',
+  'color', 'fontFamily', 'fontFallbacks', 'fontSize', 'fontWeight', 'fontStyle',
   'lineHeight', 'letterSpacing', 'textAlign', 'textTransform',
 ] as const;
 
@@ -18,13 +18,16 @@ const INLINE_TAGS = new Set([
   'a', 'abbr', 'cite', 'q', 'sub', 'sup', 'time', 'label', 'br',
 ]);
 
+/** Inline-level by default in the browser, but rendered as their own layers. */
+const INLINE_BOX_TAGS = new Set(['button', 'input', 'select', 'textarea', 'img', 'svg']);
+
 /** Browser default text styles for inline tags (Tailwind preflight keeps these). */
 const INLINE_DEFAULTS: Record<string, NormalizedStyle> = {
   b: { fontWeight: 700 }, strong: { fontWeight: 700 },
   i: { fontStyle: 'italic' }, em: { fontStyle: 'italic' }, cite: { fontStyle: 'italic' },
   u: { textDecoration: 'underline' }, ins: { textDecoration: 'underline' },
   s: { textDecoration: 'line-through' }, del: { textDecoration: 'line-through' },
-  code: { fontFamily: 'Roboto Mono' }, kbd: { fontFamily: 'Roboto Mono' },
+  code: { fontFamily: 'Roboto Mono', fontFallbacks: [] }, kbd: { fontFamily: 'Roboto Mono', fontFallbacks: [] },
 };
 
 const CLASS_FNS = new Set(['clsx', 'cn', 'classNames', 'classnames', 'twMerge', 'cx']);
@@ -348,6 +351,12 @@ class Converter {
       const f = String(obj.flex).trim();
       if (f === '1' || /^1\s+1\s+(0|0px|0%)$/.test(f)) inlineGrow = true;
     }
+    // `alignSelf: stretch` is the inline form of `self-stretch`; fixAxes maps it to the parent's cross axis.
+    let selfStretch = false;
+    if ('alignSelf' in obj) {
+      selfStretch = String(obj.alignSelf).trim() === 'stretch';
+      if (selfStretch) { delete obj.alignSelf; classes.push('self-stretch'); }
+    }
     if (typeof obj.width === 'string' && obj.width.trim() === '100%') explicitW = true;
     if (typeof obj.height === 'string' && obj.height.trim() === '100%') explicitH = true;
 
@@ -355,6 +364,7 @@ class Converter {
     for (const u of inl.unsupported) this.warn(`Unsupported inline style: ${u}`);
     const style: NormalizedStyle = { ...tw.style, ...inl.style };
     if (inlineGrow) { style.widthSizing = 'FILL'; grow = true; }
+    if (selfStretch) style.heightSizing = 'FILL';
     return { style, classes, grow, explicitW, explicitH };
   }
 
@@ -403,6 +413,8 @@ class Converter {
     const tag = tagName(el.openingElement.name);
     const { style, classes, grow, explicitW, explicitH } = this.readStyle(el);
     if (style.display === 'none' && !isRoot) return null;
+    // Inline-level elements keep their content width in block flow; flex parents ignore this.
+    if (style.display === undefined && (INLINE_TAGS.has(tag) || INLINE_BOX_TAGS.has(tag))) style.inline = true;
     this.fixAxes(style, classes, grow, explicitW, explicitH, parentDir);
 
     // Arbitrary properties like [font-synthesis:none] make poor layer names.

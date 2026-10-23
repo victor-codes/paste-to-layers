@@ -4,6 +4,7 @@ export type Sizing = 'HUG' | 'FILL' | 'FIXED';
 export interface NormalizedStyle {
   // layout
   display?: 'flex' | 'block' | 'none';
+  inline?: boolean;               // inline-level box (span, inline-flex): not stretched by a block parent
   direction?: 'row' | 'column';
   gap?: number;
   padding?: { top: number; right: number; bottom: number; left: number };
@@ -14,7 +15,9 @@ export interface NormalizedStyle {
   widthSizing?: Sizing; heightSizing?: Sizing;
   minWidth?: number; maxWidth?: number;
   position?: 'absolute' | 'relative';
-  top?: number; left?: number;
+  top?: number; left?: number; right?: number; bottom?: number; // px part of the inset
+  insetPct?: { top?: number; right?: number; bottom?: number; left?: number }; // fraction of the parent's size (`calc(50% - 8px)`)
+  translate?: { x: number; y: number; xPct: number; yPct: number }; // px plus a fraction of the node's own size
   // box
   background?: RGBA;
   gradient?: Gradient;
@@ -28,6 +31,7 @@ export interface NormalizedStyle {
   // text
   color?: RGBA;
   fontFamily?: string;
+  fontFallbacks?: string[];       // rest of the CSS font stack, generic families dropped
   fontSize?: number;
   fontWeight?: number;
   fontStyle?: 'normal' | 'italic';

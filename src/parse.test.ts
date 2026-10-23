@@ -165,6 +165,14 @@ describe('convert', () => {
       expect(col.children[0].style.widthSizing).toBe('FILL');
       expect(col.children[0].style.heightSizing).toBeUndefined();
     });
+    it('inline alignSelf: stretch matches self-stretch', () => {
+      const row = convert(`export default () => <div style={{display:'flex'}}><div style={{alignSelf:'stretch'}}>a</div></div>`);
+      expect(frame(row.root).children[0].style.heightSizing).toBe('FILL');
+      expect(row.warnings).toEqual([]);
+      const col = frame(convert(`export default () => <div style={{display:'flex',flexDirection:'column'}}><div style={{alignSelf:'stretch',width:'193px'}}>a</div></div>`).root);
+      expect(col.children[0].style.widthSizing).toBe('FILL');
+      expect(col.children[0].style.heightSizing).toBeUndefined();
+    });
     it('default directions', () => {
       expect(frame(convert(`export default () => <div className="flex"><a/></div>`).root).style.direction).toBe('row');
       expect(frame(convert(`export default () => <div><a/></div>`).root).style.direction).toBe('column');
@@ -225,5 +233,13 @@ describe('design-tool exports (Paper)', () => {
     if (root.kind !== 'svg') return;
     expect(root.svg).toBe(`<svg width="88" height="88" ><rect stroke-width="5" style="opacity:0.9" /></svg>`);
     expect(root.style.width).toBe(64);
+  });
+});
+
+describe('inline-level elements', () => {
+  it('marks spans, buttons and inline-flex as inline, leaves divs block', () => {
+    const { root } = convert(`<div className="p-4"><div className="p-2 bg-red-500" /><button className="px-4 bg-blue-500">Go</button><div className="inline-flex p-1 bg-black" /></div>`);
+    if (root.kind !== 'frame') throw new Error('expected frame');
+    expect(root.children.map((c) => !!c.style.inline)).toEqual([false, true, true]);
   });
 });

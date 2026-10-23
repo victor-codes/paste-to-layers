@@ -10,6 +10,7 @@ exports[`convert > snapshots the IR 1`] = `
         "style": {
           "height": 64,
           "heightSizing": "FIXED",
+          "inline": true,
           "width": 64,
           "widthSizing": "FIXED",
         },
@@ -77,6 +78,7 @@ exports[`convert > snapshots the IR 1`] = `
             "r": 1,
           },
           "direction": "column",
+          "inline": true,
           "padding": {
             "bottom": 8,
             "left": 16,

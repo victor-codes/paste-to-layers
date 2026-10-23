@@ -1,7 +1,7 @@
 import { render, renderWarnings } from './render';
 import type { ToSandbox, ToUI } from './types';
 
-figma.showUI(__html__, { width: 480, height: 640, themeColors: true });
+figma.showUI(__html__, { width: 360, height: 440, themeColors: true });
 
 const post = (m: ToUI) => figma.ui.postMessage(m);
 
