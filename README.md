@@ -1,6 +1,6 @@
 # Paste to Layers
 
-A Figma plugin that converts pasted React JSX (Tailwind classes and/or inline `style`) into Figma layers with auto layout.
+A Figma plugin that converts pasted React JSX or HTML (Tailwind classes, inline styles or `<style>` blocks) into Figma layers with auto layout. Paste the code, or drop a file onto the plugin window.
 
 ## Install and build
 
@@ -31,6 +31,8 @@ Figma desktop: Plugins → Development → Import plugin from manifest → selec
 - Tailwind v3 and v4, including arbitrary values (`w-[960px]`), arbitrary properties (`[border-width:1.5px]`) and v4 syntax (`text-sm/6`, `size-*`, `w-7xl`, `font-['Inter_Tight']`)
 - Inline `style` objects (camelCase properties, px/rem/em/% values, hex, rgb, hsl, oklch and oklab colors)
 - JSX copied from Paper (Tailwind or inline styles)
+- HTML, pasted or dropped as an `.html` file: a whole page or a fragment. The plugin window's browser parses it, so unclosed tags, comments and entities are fine. `<style>` rules are applied by specificity (class, id, tag, combinator and structural selectors such as `:first-child`), CSS variables are resolved, and `style="..."` and Tailwind classes work as in JSX. Pages without Tailwind get the browser's default heading sizes and paragraph spacing
+- Dropping an `.html`, `.jsx` or `.tsx` file onto the plugin window loads it like a paste
 - Class helpers (`clsx`, `cn`, etc.) with static strings; default export, named or arrow components
 
 ### Layout
@@ -97,6 +99,31 @@ Most of these show a warning after converting; the last group is dropped silentl
 
 - Variants (`hover:`, `md:`, `dark:`); only the base style is drawn
 - Custom theme values from a project's Tailwind config; only the default scale and arbitrary `[...]` values are recognized
+
+### HTML
+
+Plans for closing most of these are in `plans/09-html-gaps.md`.
+
+Outside the file:
+- External stylesheets (`<link rel="stylesheet">`, `@import`) aren't loaded, and scripts aren't run, so a JavaScript app's HTML shell comes out almost empty (both with a warning). Paste the component code instead
+- Relative image paths (`img/logo.png`) can't be fetched and become placeholders; full `https://` URLs and `data:` images work
+- `@font-face` and web font links are ignored; fonts come from what's installed in Figma
+
+Skipped CSS:
+- `@media` blocks are skipped with a warning, so mobile-first pages come out with their phone layout. Variables defined inside `@media` count as undefined
+- Rules for states and pseudo-elements (`:hover`, `:focus`, `::before`, `::after`) are skipped with a warning; content added by `::before`/`::after` is missing
+- `@apply`, `@theme` and other Tailwind directives inside `<style>`
+- `vw`/`vh` units, `clamp()`/`min()`/`max()`, `inherit`/`initial`, and `currentColor` (except as a border's default color). `calc()` works
+
+Layout:
+- Tables are drawn as stacked rows of frames, not aligned columns
+- `float`, `position: fixed` and `position: sticky`
+- Block vs inline mostly follows the tag name, so `display: inline` or `inline-block` on block tags may not sit in a row
+- Browser defaults are limited to headings, paragraphs, lists, blockquotes and links: no list bullets or numbers, form control styling or table borders
+
+Approximations:
+- Specificity is exact for tag, class and id selectors but simplified for `:is()`, `:where()`, `:not()` and attribute selectors
+- A page with no `<style>` and no `style` attributes is treated as Tailwind and gets no browser defaults
 
 ### React
 

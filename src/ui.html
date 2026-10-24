@@ -33,6 +33,7 @@
     outline: none; background: var(--figma-color-bg, #fff);
     border-color: var(--figma-color-border-selected, #0d99ff);
   }
+  .editor.dragging textarea { border-color: var(--figma-color-border-selected, #0d99ff); border-style: dashed; background: var(--figma-color-bg-selected, #e5f4ff); }
   .editor.invalid textarea { border-color: var(--figma-color-border-danger-strong, #f24822); }
 
   /* Empty state sits on top of the editor; clicks pass through to the textarea */
@@ -102,13 +103,13 @@
 <body>
 <header>
   <h1>Paste to Layers</h1>
-  <p class="sub">Paste a component styled with Tailwind or inline styles.</p>
+  <p class="sub">Paste or drop a React component or an HTML page.</p>
 </header>
 
 <div class="editor" id="editor">
-  <textarea id="code" spellcheck="false" autocomplete="off" aria-label="React component source" aria-describedby="status"></textarea>
+  <textarea id="code" spellcheck="false" autocomplete="off" aria-label="Component or HTML source" aria-describedby="status"></textarea>
   <div class="empty" id="empty">
-    <div><strong>Nothing to convert yet</strong>JSX, TSX, or a whole component file all work.</div>
+    <div><strong>Nothing to convert yet</strong>JSX, TSX, HTML or a whole file all work. You can also drop a file here.</div>
     <button class="link" id="example" type="button">Insert an example</button>
   </div>
 </div>

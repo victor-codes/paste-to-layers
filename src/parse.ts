@@ -1,7 +1,7 @@
 import { parse } from '@babel/parser';
 import type { ConvertResult, IRNode, NormalizedStyle, TextSpan } from './types';
 import { tailwindToStyle } from './tailwind';
-import { inlineToStyle } from './inlineStyle';
+import { camelProp, inlineToStyle, parseDeclarations } from './inlineStyle';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -13,13 +13,13 @@ const TEXT_KEYS = [
 ] as const;
 
 /** Phrasing elements that can flow inside a single text layer. */
-const INLINE_TAGS = new Set([
+export const INLINE_TAGS = new Set([
   'span', 'b', 'strong', 'i', 'em', 'u', 's', 'del', 'ins', 'mark', 'small', 'code', 'kbd',
   'a', 'abbr', 'cite', 'q', 'sub', 'sup', 'time', 'label', 'br',
 ]);
 
 /** Inline-level by default in the browser, but rendered as their own layers. */
-const INLINE_BOX_TAGS = new Set(['button', 'input', 'select', 'textarea', 'img', 'svg']);
+export const INLINE_BOX_TAGS = new Set(['button', 'input', 'select', 'textarea', 'img', 'svg']);
 
 /** Browser default text styles for inline tags (Tailwind preflight keeps these). */
 const INLINE_DEFAULTS: Record<string, NormalizedStyle> = {
@@ -244,6 +244,9 @@ function tagName(nameNode: N): string {
   }
 }
 
+const hasMargin = (s: NormalizedStyle) =>
+  !!s.margin && (!!s.margin.autoX || [s.margin.top, s.margin.right, s.margin.bottom, s.margin.left].some((v) => v !== 0));
+
 function collapseJsxText(raw: string): string {
   const lines = raw.split(/\r\n|\n|\r/);
   let last = 0;
@@ -358,6 +361,9 @@ class Converter {
           obj[key] = v;
         }
       }
+    } else if (sa?.value?.type === 'StringLiteral') {
+      // HTML's style="a: b; c: d"
+      for (const d of parseDeclarations(sa.value.value)) if (!d.prop.startsWith('--')) obj[camelProp(d.prop)] = d.value;
     } else if (sa) this.warn('Skipped non-literal style prop');
 
     if ('flexGrow' in obj) {
@@ -514,6 +520,7 @@ class Converter {
     const m = n.style.margin;
     if (!m) return n;
     delete n.style.margin;
+    if (!hasMargin({ margin: m })) return n;
     if (n.style.position === 'absolute') {
       if (n.style.left !== undefined) n.style.left += m.left; else if (n.style.right !== undefined) n.style.right += m.right;
       if (n.style.top !== undefined) n.style.top += m.top; else if (n.style.bottom !== undefined) n.style.bottom += m.bottom;
@@ -655,7 +662,7 @@ class Converter {
       const { style } = this.readStyle(el);
       if (style.display === 'none') return true;
       if (hasBox(style) || style.display || style.direction || style.width !== undefined ||
-          style.height !== undefined || style.position === 'absolute' || style.margin) return false;
+          style.height !== undefined || style.position === 'absolute' || hasMargin(style)) return false;
       const spanStyle = { ...cur, ...INLINE_DEFAULTS[tag], ...pickSpanText(style) };
       // Reserve the slot first so outer spans are applied before nested ones.
       const span: TextSpan = { start: text.length, end: text.length, style: spanStyle };
@@ -797,7 +804,7 @@ function numericOrNull(v: string | number | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export function convert(code: string): ConvertResult {
+export function convert(code: string, name?: string): ConvertResult {
   let ast: N;
   try {
     ast = parse(code, { sourceType: 'module', plugins: ['jsx', 'typescript'] });
@@ -807,6 +814,6 @@ export function convert(code: string): ConvertResult {
   const picked = pickRoot(ast.program.body);
   if (!picked) throw new Error('No JSX found in the pasted code');
   const conv = new Converter(code);
-  const root = conv.convertRoot(picked.jsx, picked.name);
+  const root = conv.convertRoot(picked.jsx, name ?? picked.name);
   return { root, warnings: [...new Set(conv.warnings)] };
 }

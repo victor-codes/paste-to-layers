@@ -2,3 +2,7 @@ node_modules
 dist
 .DS_Store
 *.log
+
+scratch.md*
+plugin-generated.png
+component.png

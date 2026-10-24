@@ -20,6 +20,47 @@ function splitTop(s: string, sep: RegExp = /\s+/): string[] {
   return out;
 }
 
+/** Splits CSS text on `sep` outside parentheses and quotes (so `url(data:…;base64,…)` stays whole). */
+export function splitCss(s: string, sep: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quote = '';
+  let cur = '';
+  for (const ch of s) {
+    if (quote) { if (ch === quote) quote = ''; }
+    else if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === sep && depth === 0) { out.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+export interface Declaration { prop: string; value: string; important: boolean }
+
+/** `color: red; margin: 0 !important` → declarations in order (property names lowercased, as written). */
+export function parseDeclarations(css: string): Declaration[] {
+  const out: Declaration[] = [];
+  for (const part of splitCss(css.replace(/\/\*[\s\S]*?\*\//g, ''), ';')) {
+    const i = part.indexOf(':');
+    if (i < 0) continue;
+    const prop = part.slice(0, i).trim();
+    let value = part.slice(i + 1).trim();
+    if (!prop || !value) continue;
+    const important = /!\s*important\s*$/i.test(value);
+    if (important) value = value.replace(/!\s*important\s*$/i, '').trim();
+    out.push({ prop: prop.startsWith('--') ? prop : prop.toLowerCase(), value, important });
+  }
+  return out;
+}
+
+/** `background-color` → `backgroundColor`, `-webkit-line-clamp` → `WebkitLineClamp` (React's style keys). */
+export function camelProp(p: string): string {
+  return p.replace(/^-ms-/, 'ms-').replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
 /** Properties with no visual effect in Figma (rendering hints, box model, wrapping, interaction). */
 const IGNORED = new Set([
   'boxSizing', 'fontSynthesis', 'WebkitFontSmoothing', 'MozOsxFontSmoothing', 'textRendering',
@@ -902,7 +943,8 @@ export function inlineToStyle(obj: Record<string, string | number>): { style: No
         if (!IGNORED.has(key)) unsupported.push(key);
     }
   }
-  if (margin.some((m) => m !== undefined)) {
+  // margin: 0 (a common reset) is the same as no margin.
+  if (margin.some((m) => m !== undefined && m !== 0)) {
     const n = (m: number | 'auto' | undefined) => (typeof m === 'number' ? m : 0);
     style.margin = { top: n(margin[0]), right: n(margin[1]), bottom: n(margin[2]), left: n(margin[3]) };
     if (margin[1] === 'auto' && margin[3] === 'auto') style.margin.autoX = true;

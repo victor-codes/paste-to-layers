@@ -1,4 +1,5 @@
 import { convert } from './parse';
+import { convertHtml, looksLikeHtml } from './html';
 import { CHECKS_COMMAND, checksReport, testImage } from './checksUi';
 import type { ConvertResult, IRNode, ToUI } from './types';
 
@@ -91,7 +92,7 @@ function validate() {
     return;
   } else {
     try {
-      result = convert(src);
+      result = looksLikeHtml(src) ? convertHtml(src) : convert(src);
       setStatus('idle', `${result.root.name} · ${plural(countLayers(result.root), 'layer')}`);
       showWarnings(result.warnings);
     } catch (e) {
@@ -130,6 +131,28 @@ function setCode(v: string) {
 }
 
 $('example').addEventListener('click', () => setCode(EXAMPLE));
+
+// Dropping a file (.html, .jsx, .tsx…) loads its text, as if it had been pasted.
+const MAX_FILE = 2 * 1024 * 1024;
+let dragDepth = 0;
+const dragging = (on: boolean) => editor.classList.toggle('dragging', on);
+document.addEventListener('dragenter', (e) => {
+  if (!e.dataTransfer?.types.includes('Files')) return;
+  e.preventDefault();
+  dragDepth++;
+  dragging(true);
+});
+document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; dragging(false); } });
+document.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
+document.addEventListener('drop', (e) => {
+  const file = e.dataTransfer?.files[0];
+  if (!file) return;
+  e.preventDefault();
+  dragDepth = 0;
+  dragging(false);
+  if (file.size > MAX_FILE) { setStatus('error', `${file.name} is too large (over 2 MB).`); return; }
+  file.text().then(setCode, () => setStatus('error', `Could not read ${file.name}.`));
+});
 clearBtn.addEventListener('click', () => setCode(''));
 
 // Clicking an error moves the caret to where the parser stopped.
