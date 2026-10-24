@@ -1,4 +1,5 @@
 import { render, renderWarnings } from './render';
+import { runChecks } from './checks';
 import type { ToSandbox, ToUI } from './types';
 
 figma.showUI(__html__, { width: 360, height: 440, themeColors: true });
@@ -6,6 +7,14 @@ figma.showUI(__html__, { width: 360, height: 440, themeColors: true });
 const post = (m: ToUI) => figma.ui.postMessage(m);
 
 figma.ui.onmessage = async (msg: ToSandbox) => {
+  if (msg?.type === 'checks') {
+    try {
+      post({ type: 'checks', results: await runChecks(msg.image) });
+    } catch (e) {
+      post({ type: 'error', message: 'Checks failed: ' + (e instanceof Error ? e.message : String(e)) });
+    }
+    return;
+  }
   if (!msg || msg.type !== 'render') return;
   try {
     const { node, count } = await render(msg.payload.root);

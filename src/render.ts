@@ -1,4 +1,4 @@
-import type { Gradient, GridTrack, IRNode, NormalizedStyle, RGBA, Sizing } from './types';
+import type { BgLayer, Gradient, GridTrack, ImageAdjust, ImageFit, IRNode, NormalizedStyle, Pct, RGBA, Sizing } from './types';
 
 /** Warnings collected during the most recent render() call (array is cleared at the start of each call). */
 export const renderWarnings: string[] = [];
@@ -179,7 +179,167 @@ async function imagePaint(url: string, name: string): Promise<ImagePaint | null>
   return { type: 'IMAGE', imageHash: h, scaleMode: 'FILL' };
 }
 
+const imageSizes = new Map<string, Promise<{ width: number; height: number } | null>>();
+function imageSize(hash: string): Promise<{ width: number; height: number } | null> {
+  let p = imageSizes.get(hash);
+  if (!p) {
+    const img = figma.getImageByHash(hash);
+    p = img ? img.getSizeAsync().catch(() => null) : Promise.resolve(null);
+    imageSizes.set(hash, p);
+  }
+  return p;
+}
+
+/**
+ * The image's box in px for CSS background-size / object-fit on a w × h box, and its offset from
+ * background-position / object-position. Null means Figma's own FILL (centred cover) is exact.
+ */
+export function imageBox(fit: ImageFit, w: number, h: number, iw: number, ih: number): { x: number; y: number; w: number; h: number } {
+  let bw: number;
+  let bh: number;
+  const size = fit.size ?? 'cover';
+  if (fit.stretch) { bw = w; bh = h; }
+  else if (size === 'cover' || size === 'contain') {
+    const k = (size === 'cover' ? Math.max : Math.min)(w / iw, h / ih);
+    bw = iw * k; bh = ih * k;
+  } else {
+    const len = (l: Pct | 'auto', box: number) => (l === 'auto' ? null : l.pct * box + l.px);
+    const sw = len(size.w, w);
+    const sh = len(size.h, h);
+    bw = sw ?? (sh !== null ? (sh * iw) / ih : iw);
+    bh = sh ?? (sw !== null ? (sw * ih) / iw : ih);
+  }
+  // object-position defaults to centre; background-position to the top left unless the size is cover/contain.
+  const def: Pct = { pct: typeof size === 'string' ? 0.5 : 0, px: 0 };
+  const pos = fit.position ?? { x: def, y: def };
+  return { x: (w - bw) * pos.x.pct + pos.x.px, y: (h - bh) * pos.y.pct + pos.y.px, w: bw, h: bh };
+}
+
+/** Place an image paint per CSS sizing rules; uses Figma's FILL/FIT when they're exact. */
+async function fitImage(paint: ImagePaint, fit: ImageFit | undefined, w: number, h: number): Promise<ImagePaint> {
+  if (!fit) return paint;
+  if (fit.repeat) {
+    // Tiles at the CSS background-size (natural size by default); Figma tiles from the top left.
+    const natural = await imageSize(paint.imageHash!);
+    if (!natural) return { ...paint, scaleMode: 'TILE', scalingFactor: 1 };
+    const b = imageBox({ ...fit, size: fit.size ?? { w: 'auto', h: 'auto' } }, w, h, natural.width, natural.height);
+    return { ...paint, scaleMode: 'TILE', scalingFactor: b.w / natural.width };
+  }
+  const centred = !fit.position || (fit.position.x.pct === 0.5 && fit.position.y.pct === 0.5 && !fit.position.x.px && !fit.position.y.px);
+  if (!fit.stretch && centred && (fit.size === undefined || fit.size === 'cover')) return { ...paint, scaleMode: 'FILL' };
+  if (!fit.stretch && centred && fit.size === 'contain') return { ...paint, scaleMode: 'FIT' };
+  const natural = await imageSize(paint.imageHash!);
+  if (!natural || w <= 0 || h <= 0) return paint;
+  const b = imageBox(fit, w, h, natural.width, natural.height);
+  // CROP's transform maps the node's unit square into the image's.
+  const t: Transform = [[w / b.w, 0, -b.x / b.w], [0, h / b.h, -b.y / b.h]];
+  return { ...paint, scaleMode: 'CROP', imageTransform: t };
+}
+
+/** CSS filter amounts (1 = unchanged) → Figma image adjustments (-1..1, 0 = unchanged); approximate. */
+export function imageAdjustments(a: ImageAdjust): ImageFilters {
+  const map = (amount: number, k: { DOWN: number; UP: number }) =>
+    Math.max(-1, Math.min(1, Math.round((amount - 1) * (amount < 1 ? k.DOWN : k.UP) * 100) / 100));
+  return {
+    ...(a.brightness !== undefined && { exposure: map(a.brightness, CALIBRATION.EXPOSURE) }),
+    ...(a.contrast !== undefined && { contrast: map(a.contrast, CALIBRATION.CONTRAST) }),
+    ...(a.saturate !== undefined && { saturation: map(a.saturate, CALIBRATION.SATURATION) }),
+  };
+}
+
+/** background-image layers → Figma paints, bottom first (CSS lists the top layer first). */
+async function backgroundPaints(s: NormalizedStyle, name: string, w: number, h: number): Promise<Paint[]> {
+  const layers: BgLayer[] = s.layers ??
+    [...(s.gradient ? [{ gradient: s.gradient }] : []), ...(s.imageUrl ? [{ url: s.imageUrl }] : [])];
+  const out: Paint[] = [];
+  for (const l of [...layers].reverse()) {
+    if ('gradient' in l) { out.push(gradientPaint(l.gradient, w, h)); continue; }
+    let p = await imagePaint(l.url, name);
+    if (!p) { out.push(solid(PLACEHOLDER)); continue; }
+    p = await fitImage(p, s.imageFit, w, h);
+    if (s.imageFilters) p = { ...p, filters: imageAdjustments(s.imageFilters) };
+    out.push(p);
+  }
+  return out;
+}
+
 const PLACEHOLDER: RGBA = { r: 0xe5 / 255, g: 0xe7 / 255, b: 0xeb / 255, a: 1 };
+
+/** Any CSS gradient → Figma paint for a box of w × h. */
+export function gradientPaint(g: Gradient, w: number, h: number): GradientPaint {
+  if (g.type === 'radial') return radialGradient(g, w, h);
+  if (g.type === 'conic') return conicGradient(g, w, h);
+  return linearGradient(g, w, h);
+}
+
+const stopsOf = (g: Gradient) =>
+  g.stops.map((st) => ({ position: st.position, color: { r: st.color.r, g: st.color.g, b: st.color.b, a: st.color.a } }));
+
+/** Radial radii in px for CSS's size keywords (default `farthest-corner`) or explicit lengths. */
+export function radialRadii(g: Gradient, w: number, h: number): { rx: number; ry: number } {
+  const cx = (g.cx ?? 0.5) * w;
+  const cy = (g.cy ?? 0.5) * h;
+  const ext = g.extent ?? 'farthest-corner';
+  if (typeof ext === 'object') {
+    const rx = ext.x.pct * w + ext.x.px;
+    return { rx, ry: g.circle ? rx : ext.y.pct * h + ext.y.px };
+  }
+  const pick = ext.startsWith('closest') ? Math.min : Math.max;
+  const dx = pick(cx, w - cx);
+  const dy = pick(cy, h - cy);
+  if (ext.endsWith('side')) {
+    if (g.circle) { const r = pick(dx, dy); return { rx: r, ry: r }; }
+    return { rx: dx, ry: dy };
+  }
+  // Corners: a circle passes through the corner; an ellipse keeps the side ratio, scaled by √2.
+  if (g.circle) { const r = Math.hypot(dx, dy); return { rx: r, ry: r }; }
+  return { rx: dx * Math.SQRT2, ry: dy * Math.SQRT2 };
+}
+
+/** Figma radial gradients are a circle of radius 0.5 about (0.5, 0.5) in gradient space. */
+function radialGradient(g: Gradient, w: number, h: number): GradientPaint {
+  const { rx, ry } = radialRadii(g, w, h);
+  const cx = g.cx ?? 0.5;
+  const cy = g.cy ?? 0.5;
+  const sx = w / (2 * Math.max(rx, 0.01));
+  const sy = h / (2 * Math.max(ry, 0.01));
+  return { type: 'GRADIENT_RADIAL', gradientTransform: [[sx, 0, 0.5 - cx * sx], [0, sy, 0.5 - cy * sy]], gradientStops: stopsOf(g) };
+}
+
+/** CSS conic starts at the top (`from` turns it clockwise); Figma's angular gradient starts along +x. */
+function conicGradient(g: Gradient, w: number, h: number): GradientPaint {
+  return { type: 'GRADIENT_ANGULAR', gradientTransform: conicTransform(g, w, h), gradientStops: stopsOf(g) };
+}
+
+/**
+ * Calibration constants, checked against the browser by the plugin's built-in checks (type `/checks` and
+ * press Create layers). CONIC_*: where Figma's angular gradient starts relative to CSS and which way it turns.
+ * BLUR_RATIO: Figma blur radius per CSS blur px. EXPOSURE/CONTRAST/SATURATION_PER: Figma adjustment per CSS amount.
+ */
+/**
+ * Measured with `/checks` in Figma desktop. Figma's blur radius is about 2.2× CSS blur(); the conic offset/flip match CSS. Image adjustments
+ * follow different curves from CSS filters, so each has a factor below 1 (DOWN) and above 1 (UP); they're the
+ * closest fit, not exact (contrast below 1 can't go as flat as CSS).
+ */
+export const CALIBRATION = {
+  CONIC_OFFSET: -90, CONIC_FLIP: false, BLUR_RATIO: 2.2,
+  EXPOSURE: { DOWN: 0.67, UP: 0.33 }, CONTRAST: { DOWN: 3.3, UP: 2 }, SATURATION: { DOWN: 0.83, UP: 1.5 },
+};
+
+/** Gradient-space transform for a conic gradient; `offset`/`flip` are exposed so the checks can try variants. */
+export function conicTransform(g: Gradient, w: number, h: number, offset = CALIBRATION.CONIC_OFFSET, flip = CALIBRATION.CONIC_FLIP): Transform {
+  const phi = ((g.angle + offset) * Math.PI) / 180;
+  const cos = Math.cos(phi);
+  const sin = Math.sin(phi);
+  const cx = (g.cx ?? 0.5) * w;
+  const cy = (g.cy ?? 0.5) * h;
+  const k = 2 * Math.max(w, h, 0.01);
+  const f = flip ? -1 : 1;
+  return [
+    [(cos * w) / k, (sin * h) / k, 0.5 - (cos * cx + sin * cy) / k],
+    [(f * -sin * w) / k, (f * cos * h) / k, 0.5 - f * (-sin * cx + cos * cy) / k],
+  ];
+}
 
 /** CSS linear-gradient → Figma paint. The gradient line follows CSS: through the centre, long enough to reach the corners. */
 function linearGradient(g: Gradient, w: number, h: number): GradientPaint {
@@ -234,16 +394,28 @@ function applyBox(node: FrameNode | RectangleNode, s: NormalizedStyle): void {
     node.strokes = [solid(s.border.color)];
     node.strokeWeight = s.border.width;
     node.strokeAlign = 'INSIDE';
+    if (s.border.sides) {
+      const [t, r, b, l] = s.border.sides;
+      node.strokeTopWeight = t;
+      node.strokeRightWeight = r;
+      node.strokeBottomWeight = b;
+      node.strokeLeftWeight = l;
+    }
+    // Close to the browser's look: dashes three times the width, square dots.
+    const w = Math.max(1, s.border.width);
+    if (s.border.style === 'dashed') node.dashPattern = [w * 3, w * 3];
+    if (s.border.style === 'dotted') node.dashPattern = [w, w];
   }
+  const effects: Effect[] = [];
   if (s.shadows && s.shadows.length) {
     // Figma only accepts spread on frames that clip content and have a visible fill.
-    if (node.type === 'FRAME' && s.shadows.some((sh) => sh.spread !== 0)) {
+    if (node.type === 'FRAME' && s.shadows.some((sh) => sh.spread !== 0 && !sh.inset)) {
       if (s.background || s.gradient) node.clipsContent = true;
       else renderWarnings.push('Shadow spread on "' + node.name + '" needs a background in Figma; it may be ignored.');
     }
-    node.effects = s.shadows.map(
-      (sh): DropShadowEffect => ({
-        type: 'DROP_SHADOW',
+    effects.push(...s.shadows.map(
+      (sh): DropShadowEffect | InnerShadowEffect => ({
+        type: sh.inset ? 'INNER_SHADOW' : 'DROP_SHADOW',
         color: { r: sh.color.r, g: sh.color.g, b: sh.color.b, a: sh.color.a },
         offset: { x: sh.x, y: sh.y },
         radius: sh.blur,
@@ -251,8 +423,13 @@ function applyBox(node: FrameNode | RectangleNode, s: NormalizedStyle): void {
         visible: true,
         blendMode: 'NORMAL',
       })
-    );
+    ));
   }
+  // Figma's blur radius vs CSS's blur() value: see CALIBRATION.
+  if (s.blur) effects.push({ type: 'LAYER_BLUR', blurType: 'NORMAL', radius: s.blur * CALIBRATION.BLUR_RATIO, visible: true });
+  if (s.backdropBlur) effects.push({ type: 'BACKGROUND_BLUR', blurType: 'NORMAL', radius: s.backdropBlur * CALIBRATION.BLUR_RATIO, visible: true });
+  if (effects.length) node.effects = effects;
+  if (s.blendMode) node.blendMode = s.blendMode;
   if (s.opacity !== undefined) node.opacity = s.opacity;
 }
 
@@ -339,11 +516,10 @@ function setSizing(
 async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | null> {
   if (ir.style.display === 'none') return null;
   const absolute = !!parent && ir.style.position === 'absolute';
-  const s = absolute ? stretchAbsolute(ir.style, parent!) : ir.style;
+  const s = resolvePercent(absolute ? stretchAbsolute(ir.style, parent!) : ir.style, parent, absolute, ir.name);
 
   let node: SceneNode;
   let sizing: { h: Sizing; v: Sizing } = { h: 'HUG', v: 'HUG' };
-  let image: ImagePaint | null = null;
   let grid: Map<IRNode, GridCell> | undefined;
 
   if (ir.kind === 'frame') {
@@ -352,9 +528,6 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
     count++;
     f.name = ir.name;
     f.fills = s.background ? [solid(s.background)] : [];
-    if (s.imageUrl) image = await imagePaint(s.imageUrl, ir.name);
-    if (image) f.fills = [...f.fills, image];
-    else if (s.imageUrl) f.fills = [...f.fills, solid(PLACEHOLDER)];
     f.clipsContent = s.overflowHidden ?? false;
     f.layoutMode = s.direction === 'row' ? 'HORIZONTAL' : 'VERTICAL';
     if (s.justify === 'between') {
@@ -397,14 +570,21 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
     t.fills = [solid(s.color || { r: 0, g: 0, b: 0, a: 1 })];
     if (s.opacity !== undefined) t.opacity = s.opacity;
     for (const sp of ir.spans || []) await applySpan(t, sp.start, sp.end, sp.style, s);
+    if (s.textShadows?.length) {
+      t.effects = s.textShadows.map((sh): DropShadowEffect => ({
+        type: 'DROP_SHADOW', color: { r: sh.color.r, g: sh.color.g, b: sh.color.b, a: sh.color.a },
+        offset: { x: sh.x, y: sh.y }, radius: sh.blur, spread: 0, visible: true, blendMode: 'NORMAL',
+      }));
+    }
+    if (s.blendMode) t.blendMode = s.blendMode;
   } else if (ir.kind === 'image') {
     const r = figma.createRectangle();
     node = r;
     count++;
     r.name = ir.name;
-    r.resize(s.width ?? 120, s.height ?? 80);
-    if (s.imageUrl) image = await imagePaint(s.imageUrl, ir.name);
-    r.fills = [image ?? solid(PLACEHOLDER)];
+    const ratio = s.aspectRatio;
+    r.resize(s.width ?? (ratio && s.height ? s.height * ratio : 120), s.height ?? (ratio ? (s.width ?? 120) / ratio : 80));
+    r.fills = [solid(PLACEHOLDER)];
     applyBox(r, s);
   } else {
     let created: SceneNode | null = null;
@@ -476,12 +656,18 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
         t.resize(inner, t.height);
       }
     }
+    if (s.maxLines) {
+      // Truncation needs a set width; text that hugs its width never wraps, so it's left alone.
+      if (t.textAutoResize !== 'WIDTH_AND_HEIGHT') safe(() => { t.textTruncation = 'ENDING'; t.maxLines = s.maxLines!; });
+    }
   } else if (ir.kind === 'frame') {
     sizing = setSizing(node as FrameNode, s, parent, absolute, { h: 'HUG', v: 'HUG' });
     const f = node as FrameNode;
     if (s.minWidth !== undefined) safe(() => { f.minWidth = s.minWidth!; });
     if (s.maxWidth !== undefined) safe(() => { f.maxWidth = s.maxWidth!; });
     if (s.minHeight !== undefined) safe(() => { f.minHeight = s.minHeight!; });
+    if (s.maxHeight !== undefined) safe(() => { f.maxHeight = s.maxHeight!; });
+    if (s.aspectRatio) sizing = applyAspect(f, s, sizing);
     if (grid) sizeTracks(f, s, sizing);
   } else {
     setSizing(node as FrameNode, s, parent, absolute, { h: 'FIXED', v: 'FIXED' });
@@ -510,19 +696,104 @@ async function build(ir: IRNode, parent: ParentCtx | null): Promise<SceneNode | 
   }
 
   // Both need the final size, so they run once children have been laid out.
-  if (s.gradient && (ir.kind === 'frame' || ir.kind === 'image')) {
+  if (ir.kind === 'frame' || ir.kind === 'image') {
     const f = node as FrameNode | RectangleNode;
-    const base: Paint[] = ir.kind === 'frame' && s.background ? [solid(s.background)] : [];
-    if (image) base.push(image);
-    f.fills = [...base, linearGradient(s.gradient, f.width, f.height)];
+    const paints = await backgroundPaints(s, ir.name, f.width, f.height);
+    if (paints.length) f.fills = [...(ir.kind === 'frame' && s.background ? [solid(s.background)] : []), ...paints];
+  }
+  if (s.imageFilters && !s.imageUrl) {
+    renderWarnings.push('Filters on "' + ir.name + '" were skipped: Figma only has brightness/contrast/saturation adjustments for images.');
   }
   if (ir.kind === 'text' && s.textGradient) {
     const t = node as TextNode;
-    t.fills = [linearGradient(s.textGradient, t.width, t.height)];
+    t.fills = [gradientPaint(s.textGradient, t.width, t.height)];
   }
-  if (!absolute) applyRotation(node, s, false);
+  if (!absolute) {
+    applyScale(node, s, false);
+    applyRotation(node, s, false);
+    applyMatrix(node, s, false);
+  }
 
   return node;
+}
+
+/**
+ * CSS scale() is visual only and centred; Figma rescales the layer (children, strokes, text). In flow that also
+ * changes the space it takes, which CSS doesn't, so neighbours may shift.
+ */
+function applyScale(node: SceneNode, s: NormalizedStyle, absolute: boolean): void {
+  if (!s.scale || s.scale === 1 || !('rescale' in node)) return;
+  const w = node.width;
+  const h = node.height;
+  safe(() => (node as FrameNode).rescale(s.scale!));
+  if (absolute && s.transformOrigin !== 'top-left') {
+    node.x += (w - node.width) / 2;
+    node.y += (h - node.height) / 2;
+  }
+}
+
+/**
+ * Skew or uneven scale: set the layer's transform matrix directly. CSS transforms about the centre
+ * (unless origin is top-left), so the origin point stays put; in auto layout Figma positions it anyway.
+ */
+function applyMatrix(node: SceneNode, s: NormalizedStyle, absolute: boolean): void {
+  if (!s.matrix || !('relativeTransform' in node)) return;
+  const [a, b, c, d] = s.matrix;
+  const ox = s.transformOrigin === 'top-left' ? 0 : node.width / 2;
+  const oy = s.transformOrigin === 'top-left' ? 0 : node.height / 2;
+  const x = node.x + (absolute ? ox - (a * ox + c * oy) : 0);
+  const y = node.y + (absolute ? oy - (b * ox + d * oy) : 0);
+  // Figma keeps the transform's axes at unit length and holds any stretch in the layer's size,
+  // so the axis lengths go into width/height and the matrix is normalised.
+  const sx = Math.hypot(a, b);
+  const sy = Math.hypot(c, d);
+  try {
+    if (sx < 1e-6 || sy < 1e-6) throw new Error('degenerate');
+    if ('resize' in node && (Math.abs(sx - 1) > 1e-6 || Math.abs(sy - 1) > 1e-6)) {
+      node.resize(Math.max(0.01, node.width * sx), Math.max(0.01, node.height * sy));
+    }
+    node.relativeTransform = [[a / sx, c / sy, x], [b / sx, d / sy, y]];
+  } catch (e) {
+    renderWarnings.push('Could not skew or stretch "' + node.name + '" in Figma; it was left untransformed.');
+  }
+}
+
+/** aspect-ratio: the free axis follows the set one, and the ratio is locked for later resizing. */
+function applyAspect(f: FrameNode, s: NormalizedStyle, sizing: { h: Sizing; v: Sizing }): { h: Sizing; v: Sizing } {
+  const r = s.aspectRatio!;
+  if (sizing.v !== 'FIXED' || s.height === undefined) {
+    f.resize(f.width, Math.max(0.01, f.width / r));
+    sizing = { ...sizing, v: 'FIXED' };
+  } else if (sizing.h !== 'FIXED' || s.width === undefined) {
+    f.resize(Math.max(0.01, f.height * r), f.height);
+    sizing = { ...sizing, h: 'FIXED' };
+  }
+  safe(() => { f.layoutSizingHorizontal = sizing.h; f.layoutSizingVertical = sizing.v; });
+  safe(() => f.lockAspectRatio());
+  return sizing;
+}
+
+/** Percentage sizes against the parent's content box (padding box for absolute children), once it's known. */
+function resolvePercent(s: NormalizedStyle, parent: ParentCtx | null, absolute: boolean, name: string): NormalizedStyle {
+  if (!s.widthPct && !s.heightPct) return s;
+  const out = { ...s };
+  const axes = [['width', 'widthPct', 'widthSizing', 'definiteW'], ['height', 'heightPct', 'heightSizing', 'definiteH']] as const;
+  for (const [dim, key, sizing, definite] of axes) {
+    const p = s[key];
+    if (!p) continue;
+    delete out[key];
+    if (!parent || !parent.style || !parent[definite]) {
+      renderWarnings.push('"' + name + '" has a percentage ' + dim + ' but its parent\'s ' + dim + ' isn\'t set, so it was sized to its content.');
+      continue;
+    }
+    const f = parent.frame;
+    const box = dim === 'width'
+      ? f.width - (absolute ? 0 : f.paddingLeft + f.paddingRight)
+      : f.height - (absolute ? 0 : f.paddingTop + f.paddingBottom);
+    out[dim] = Math.max(0, p.pct * box + p.px);
+    out[sizing] = 'FIXED';
+  }
+  return out;
 }
 
 /**
@@ -671,7 +942,9 @@ function placeAbsolute(node: SceneNode, s: NormalizedStyle, parent: FrameNode): 
   }
   node.x = x;
   node.y = y;
+  applyScale(node, s, true);
   applyRotation(node, s, true);
+  applyMatrix(node, s, true);
 }
 
 /**

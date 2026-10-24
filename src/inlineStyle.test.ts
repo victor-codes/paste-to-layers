@@ -13,7 +13,7 @@ vi.mock('./colors', () => ({
   },
 }));
 
-import { inlineToStyle } from './inlineStyle';
+import { inlineToStyle, parseGradient } from './inlineStyle';
 
 describe('inlineToStyle', () => {
   it('handles padding shorthands', () => {
@@ -37,9 +37,11 @@ describe('inlineToStyle', () => {
     ]);
     expect(style.background).toEqual({ r: 0, g: 0, b: 0, a: 1 });
   });
-  it('reports gradients and percentages as unsupported', () => {
-    const r = inlineToStyle({ background: 'linear-gradient(red, blue)', width: '50%' });
-    expect(r.unsupported).toEqual(['background', 'width']);
+  it('reports unparseable gradients, keeps percentages for the renderer', () => {
+    const r = inlineToStyle({ background: 'linear-gradient(red, blue)', width: '50%', height: 'calc(100% - 20px)' });
+    expect(r.unsupported).toEqual(['background']);
+    expect(r.style.widthPct).toEqual({ pct: 0.5, px: 0 });
+    expect(r.style.heightPct).toEqual({ pct: 1, px: -20 });
     expect(inlineToStyle({ width: '100%' }).style.widthSizing).toBe('FILL');
   });
   it('converts rem and em', () => {
@@ -130,5 +132,73 @@ describe('positioning and fonts from Paper exports', () => {
 
   it('keeps the line type of a text-decoration shorthand', () => {
     expect(inlineToStyle({ textDecoration: 'underline 1px oklch(55% 0.2 30)' }).style.textDecoration).toBe('underline');
+  });
+
+  it('reads per-side border shorthands and colors', () => {
+    const { style, unsupported } = inlineToStyle({ borderBottom: '1px solid #ff0000', borderTopWidth: '2px', borderTopColor: '#ff0000', borderLeftStyle: 'solid' });
+    expect(unsupported).toEqual([]);
+    expect(style.border).toEqual({ width: 2, color: { r: 1, g: 0, b: 0, a: 1 }, sides: [2, 0, 1, 0] });
+    const multi = inlineToStyle({ borderWidth: '1px', borderColor: '#ff0000 #00ff00' });
+    expect(multi.style.border?.color).toEqual({ r: 1, g: 0, b: 0, a: 1 });
+    expect(multi.unsupported).toEqual(['borderColor']);
+  });
+
+  it('reads blur filters', () => {
+    const { style, unsupported } = inlineToStyle({ filter: 'blur(10px)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' });
+    expect(unsupported).toEqual([]);
+    expect([style.blur, style.backdropBlur]).toEqual([10, 8]);
+  });
+
+  it('reads margins, shadows, clamping and image placement', () => {
+    const { style, unsupported } = inlineToStyle({
+      margin: '0 auto', marginTop: '12px', boxShadow: 'inset 0 1px 2px #000000', textShadow: '0 1px 2px #000000',
+      mixBlendMode: 'screen', transform: 'scale(1.2)', WebkitLineClamp: 3, display: '-webkit-box', WebkitBoxOrient: 'vertical',
+      objectFit: 'cover', objectPosition: 'left top', aspectRatio: '1 / 1', maxHeight: '200px', borderStyle: 'dashed', border: '2px solid #000000',
+    });
+    expect(unsupported).toEqual([]);
+    expect(style.margin).toEqual({ top: 12, right: 0, bottom: 0, left: 0, autoX: true });
+    expect(style.shadows?.[0].inset).toBe(true);
+    expect(style.textShadows?.[0].blur).toBe(2);
+    expect(style.blendMode).toBe('SCREEN');
+    expect(style.scale).toBe(1.2);
+    expect(style.maxLines).toBe(3);
+    expect(style.imageFit).toEqual({ size: 'cover', position: { x: { pct: 0, px: 0 }, y: { pct: 0, px: 0 } } });
+    expect(style.aspectRatio).toBe(1);
+    expect(style.maxHeight).toBe(200);
+    expect(style.border?.style).toBe('dashed');
+  });
+
+  it('parses radial and conic gradients', () => {
+    expect(parseGradient('radial-gradient(circle 40px at 10% 20%, #ff0000, #0000ff)')).toMatchObject(
+      { type: 'radial', circle: true, cx: 0.1, cy: 0.2, extent: { x: { pct: 0, px: 40 }, y: { pct: 0, px: 40 } } });
+    const c = parseGradient('conic-gradient(from 45deg, #ff0000, #0000ff 180deg, #ff0000)');
+    expect(c).toMatchObject({ type: 'conic', angle: 45 });
+    expect(c?.stops.map((s) => s.position)).toEqual([0, 0.5, 1]);
+  });
+
+  it('keeps every background layer, top first', () => {
+    const { style } = inlineToStyle({ backgroundImage: 'linear-gradient(#000000, #ffffff), url(a.png), radial-gradient(#ff0000, #0000ff)', backgroundRepeat: 'repeat' });
+    expect(style.layers?.map((l) => ('url' in l ? 'url' : l.gradient.type ?? 'linear'))).toEqual(['linear', 'url', 'radial']);
+    expect(style.imageFit?.repeat).toBe(true);
+  });
+
+  it('turns transforms into rotation/scale or a matrix', () => {
+    expect(inlineToStyle({ transform: 'rotate(30deg) scale(2)' }).style).toMatchObject({ rotation: 30, scale: 2 });
+    const sk = inlineToStyle({ transform: 'skewX(45deg)' });
+    expect(sk.unsupported).toEqual([]);
+    expect(sk.style.matrix?.map((n) => +n.toFixed(6))).toEqual([1, 0, 1, 1]);
+    expect(inlineToStyle({ transform: 'rotateX(60deg)' }).style.matrix?.map((n) => +n.toFixed(6))).toEqual([1, 0, 0, 0.5]);
+    const m = inlineToStyle({ transform: 'matrix(1, 0, 0, 2, 10, 20)' }).style;
+    expect(m.matrix).toEqual([1, 0, 0, 2]);
+    expect(m.translate).toMatchObject({ x: 10, y: 20 });
+    expect(inlineToStyle({ transform: 'perspective(500px) rotateY(20deg)' }).unsupported).toEqual(['transform']);
+  });
+
+  it('maps image filters and opacity()', () => {
+    const { style, unsupported } = inlineToStyle({ filter: 'grayscale(100%) brightness(1.2) opacity(0.5)' });
+    expect(unsupported).toEqual([]);
+    expect(style.imageFilters).toEqual({ saturate: 0, brightness: 1.2 });
+    expect(style.opacity).toBe(0.5);
+    expect(inlineToStyle({ filter: 'hue-rotate(90deg)' }).unsupported).toEqual(['filter']);
   });
 });

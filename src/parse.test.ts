@@ -255,6 +255,47 @@ describe('Paper page sections', () => {
   });
 });
 
+describe('justify around / evenly', () => {
+  const kinds = (code: string) => frame(convert(code).root).children.map((c) => (c.kind === 'frame' && c.tag === 'spacer' ? 'S' : 'x')).join('');
+  it('adds spacers for space-between to reproduce them', () => {
+    expect(kinds(`<div className="flex justify-evenly"><a className="p-1">a</a><a className="p-1">b</a><a className="p-1">c</a></div>`)).toBe('SxxxS');
+    expect(kinds(`<div style={{display:'flex',justifyContent:'space-around'}}><a className="p-1">a</a><a className="p-1">b</a></div>`)).toBe('SxSxS');
+    expect(frame(convert(`<div className="flex justify-around"><a className="p-1">a</a><a className="p-1">b</a></div>`).root).style.justify).toBe('between');
+  });
+  it('centres a single item', () => {
+    expect(frame(convert(`<div className="flex justify-around"><a className="p-1">a</a></div>`).root).style.justify).toBe('center');
+  });
+});
+
+describe('margins, space and dividers', () => {
+  it('wraps a box with margin in a padded frame', () => {
+    const f = frame(convert(`<div className="flex flex-col"><div className="mt-4 mx-2 p-2 bg-red-500 grow">a</div></div>`).root);
+    const w = frame(f.children[0]);
+    expect(w.tag).toBe('margin');
+    expect(w.style.padding).toEqual({ top: 16, right: 8, bottom: 0, left: 8 });
+    expect(w.style.heightSizing).toBe('FILL');
+    expect(frame(w.children[0]).style.background).toBeDefined();
+  });
+  it('centres mx-auto boxes and moves absolute ones', () => {
+    const f = frame(convert(`<div><div className="mx-auto w-40 bg-red-500" /><div className="absolute left-2 top-0 ml-4 mt-1 bg-red-500" /></div>`).root);
+    expect(f.children[0].style).toMatchObject({ align: 'center', widthSizing: 'FILL' });
+    expect(f.children[1].style).toMatchObject({ left: 24, top: 4 });
+  });
+  it('puts percentage widths on the margin wrapper', () => {
+    const w = frame(frame(convert(`<div className="flex"><div className="w-1/2 ml-4 bg-red-500" /></div>`).root).children[0]);
+    expect(w.style.widthPct).toEqual({ pct: 0.5, px: 16 });
+    expect(w.children[0].style.widthSizing).toBe('FILL');
+  });
+  it('turns space-y into gap and divide-y into top borders', () => {
+    const f = frame(convert(`<ul className="space-y-3 divide-y divide-[#ff0000]"><li className="py-2">One</li><li>Two</li></ul>`).root);
+    expect(f.style.gap).toBe(12);
+    expect(f.children[0].style.border).toBeUndefined();
+    const second = frame(f.children[1]);
+    expect(second.style.border).toEqual({ width: 1, color: { r: 1, g: 0, b: 0, a: 1 }, sides: [1, 0, 0, 0] });
+    expect(second.children[0].kind).toBe('text');
+  });
+});
+
 describe('inline-level elements', () => {
   it('marks spans, buttons and inline-flex as inline, leaves divs block', () => {
     const { root } = convert(`<div className="p-4"><div className="p-2 bg-red-500" /><button className="px-4 bg-blue-500">Go</button><div className="inline-flex p-1 bg-black" /></div>`);

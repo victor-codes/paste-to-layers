@@ -1,6 +1,10 @@
-import type { NormalizedStyle, RGBA } from './types';
+import type { ImageAdjust, ImageFit, NormalizedStyle, RGBA, Shadow } from './types';
 import { parseCssColor, tailwindColor, withAlpha } from './colors';
-import { inlineToStyle, parseFontStack, parseLinearGradient, parseOffset, parseTracks } from './inlineStyle';
+import {
+  inlineToStyle, parseAspectRatio, parseBlendMode, parseFontStack, parseGradient, parseImageSize, parseOffset, parsePosition,
+  parseShadows, parseTracks, resolveBorder, SIDE_INDEX, type Sides,
+  addImageFilter, IDENTITY, mulMat, rotateMat, scaleMat, setMatrix, skewMat,
+} from './inlineStyle';
 
 const TEXT_SIZES: Record<string, [number, number]> = {
   xs: [12, 16], sm: [14, 20], base: [16, 24], lg: [18, 28], xl: [20, 28],
@@ -20,16 +24,35 @@ const MAX_W: Record<string, number> = {
   '3xs': 256, '2xs': 288, xs: 320, sm: 384, md: 448, lg: 512, xl: 576, '2xl': 672, '3xl': 768,
   '4xl': 896, '5xl': 1024, '6xl': 1152, '7xl': 1280, prose: 640,
 };
-type Shadow = NonNullable<NormalizedStyle['shadows']>[number];
 const sh = (y: number, blur: number, spread: number, a: number): Shadow =>
   ({ x: 0, y, blur, spread, color: { r: 0, g: 0, b: 0, a } });
 const SHADOWS: Record<string, Shadow | null> = {
   sm: sh(1, 2, 0, 0.05), DEFAULT: sh(1, 3, 0, 0.1), md: sh(4, 6, -1, 0.1), lg: sh(10, 15, -3, 0.1),
   xl: sh(20, 25, -5, 0.1), '2xl': sh(25, 50, -12, 0.25), none: null,
 };
+const INSET_SHADOWS: Record<string, Shadow[] | null> = {
+  '2xs': [{ x: 0, y: 1, blur: 0, spread: 0, color: { r: 0, g: 0, b: 0, a: 0.05 }, inset: true }],
+  xs: [{ x: 0, y: 1, blur: 1, spread: 0, color: { r: 0, g: 0, b: 0, a: 0.05 }, inset: true }],
+  sm: [{ x: 0, y: 2, blur: 4, spread: 0, color: { r: 0, g: 0, b: 0, a: 0.05 }, inset: true }],
+  none: null,
+};
+const ts = (y: number, blur: number, a: number): Shadow => ({ x: 0, y, blur, spread: 0, color: { r: 0, g: 0, b: 0, a } });
+/** v4.1 text-shadow scale. */
+const TEXT_SHADOWS: Record<string, Shadow[] | null> = {
+  '2xs': [ts(1, 0, 0.15)], xs: [ts(1, 1, 0.2)],
+  sm: [ts(1, 0, 0.075), ts(1, 1, 0.075), ts(2, 2, 0.075)],
+  md: [ts(1, 1, 0.1), ts(1, 2, 0.1), ts(2, 4, 0.1)],
+  lg: [ts(1, 2, 0.1), ts(3, 2, 0.1), ts(4, 8, 0.1)],
+  none: null,
+};
+const ASPECTS: Record<string, number> = { square: 1, video: 16 / 9 };
+const POSITIONS = 'center|top|bottom|left|right|left-top|left-bottom|right-top|right-bottom|top-left|top-right|bottom-left|bottom-right';
+
+/** v4 blur scale (v3's `blur-sm` was 4px). */
+const BLURS: Record<string, number> = { none: 0, xs: 4, sm: 8, DEFAULT: 8, md: 12, lg: 16, xl: 24, '2xl': 40, '3xl': 64 };
 const GRADIENT_DIRS: Record<string, number> = { t: 0, tr: 45, r: 90, br: 135, b: 180, bl: 225, l: 270, tl: 315 };
 /** Classes with no visual effect in Figma (rendering hints, box model, wrapping, interaction). */
-const IGNORED = /^(antialiased|subpixel-antialiased|shrink(-0)?|flex-shrink(-0)?|grow-0|flex-grow-0|box-(border|content)|wrap-(anywhere|break-word|normal)|break-(words|all|normal|keep)|origin-.+|border-(solid|dashed|dotted|double|none)|cursor-.+|select-.+|pointer-events-.+|transition(-.+)?|duration-.+|ease-.+|delay-.+|will-change-.+|isolate|outline-none|whitespace-normal|list-none|static|z-.+|content-(center|start|end|between|around|evenly|stretch|normal)|bg-(no-repeat|repeat|cover|contain|center|top|bottom|left|right)|bg-(size|position)-.+|row-end-auto|col-end-auto|row-start-auto|col-start-auto|self-auto|grid-flow-row)$/;
+const IGNORED = /^(antialiased|subpixel-antialiased|shrink(-0)?|flex-shrink(-0)?|grow-0|flex-grow-0|box-(border|content)|wrap-(anywhere|break-word|normal)|break-(words|all|normal|keep)|origin-.+|border(-[trblxy])?-(solid|double|hidden)|divide-(solid|double|none)|space-[xy]-reverse|divide-[xy]-reverse|text-clip|bg-origin-.+|bg-clip-(border|padding|content)|cursor-.+|select-.+|pointer-events-.+|transition(-.+)?|duration-.+|ease-.+|delay-.+|will-change-.+|isolate|outline-none|whitespace-normal|list-none|static|z-.+|content-(center|start|end|between|around|evenly|stretch|normal)|bg-(fixed|local|scroll)|row-end-auto|col-end-auto|row-start-auto|col-start-auto|self-auto|grid-flow-row)$/;
 
 const DEFAULT_BORDER_COLOR: RGBA = { r: 0xe5 / 255, g: 0xe7 / 255, b: 0xeb / 255, a: 1 };
 
@@ -86,13 +109,29 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
   const pad: { top?: number; right?: number; bottom?: number; left?: number } = {};
   const corners: [number, number, number, number] = [0, 0, 0, 0];
   let radiusSet = false;
-  let borderWidth: number | undefined;
-  let borderColor: RGBA | undefined;
+  // Per side (t, r, b, l), plus the class that set each color so a dropped one can be reported.
+  const borderW: Sides<number> = [undefined, undefined, undefined, undefined];
+  const borderC: Sides<RGBA> = [undefined, undefined, undefined, undefined];
+  const borderCTok: Sides<string> = [undefined, undefined, undefined, undefined];
+  const setBorder = (side: string, w: number | null, c: RGBA | null, tok?: string) => {
+    for (const i of SIDE_INDEX[side]) {
+      if (w !== null) borderW[i] = w;
+      if (c !== null) { borderC[i] = c; borderCTok[i] = tok; }
+    }
+  };
   let defaultLineHeight: number | undefined;
   let leading: { mult: number } | { px: number } | undefined;
   let tracking: number | undefined;
   let trackingPx: number | undefined;
   let gradAngle: number | undefined;
+  let gradType: 'radial' | 'conic' | undefined;
+  let gradAt: string | undefined;
+  const margin: Sides<number | 'auto'> = [undefined, undefined, undefined, undefined];
+  const fit: ImageFit = {};
+  const adjust: ImageAdjust = {};
+  // Tailwind composes its transform as rotate → skew → scale; 3D rotations flatten (no perspective).
+  const tf: { rot?: number; rx?: number; ry?: number; skx?: number; sky?: number; sx?: number; sy?: number } = {};
+  let borderStyle: 'solid' | 'dashed' | 'dotted' | undefined;
   let gradFrom: RGBA | undefined;
   let gradVia: RGBA | undefined;
   let gradTo: RGBA | undefined;
@@ -104,6 +143,16 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
     if (val === 'full' || val === '[100%]') { style[sizing] = 'FILL'; delete style[axis]; return true; }
     if (val === 'fit' || val === 'auto' || val === 'max' || val === 'min') { style[sizing] = 'HUG'; delete style[axis]; return true; }
     if (val === 'screen') { style[axis] = axis === 'width' ? 1440 : 900; style[sizing] = 'FIXED'; return true; }
+    // Fractions and percentages resolve against the parent at render time.
+    const frac = /^(\d+)\/(\d+)$/.exec(val);
+    const o = frac ? { pct: Number(frac[1]) / Number(frac[2]), px: 0 }
+      : /^\[.*%.*\]$/.test(val) ? parseOffset(val.slice(1, -1).replace(/_/g, ' ')) : null;
+    if (o && o.pct > 0) {
+      if (o.pct === 1 && o.px === 0) { style[sizing] = 'FILL'; delete style[axis]; return true; }
+      style[axis === 'width' ? 'widthPct' : 'heightPct'] = { pct: o.pct, px: o.px };
+      delete style[axis]; delete style[sizing];
+      return true;
+    }
     const n = axis === 'width' && val in MAX_W ? MAX_W[val] : length(val);
     if (n === null) return false;
     style[axis] = n;
@@ -111,7 +160,9 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
     return true;
   };
 
+  let curTok = '';
   for (const rawTok of className.split(/\s+/).filter(Boolean)) {
+    curTok = rawTok;
     // variants
     if (lastTop(rawTok, ':') >= 0) { unsupported.push(rawTok); continue; }
     let tok = rawTok;
@@ -140,7 +191,7 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
       const n = length(v);
       return n === null ? null : neg ? -n : n;
     };
-    if (neg && !/^(top|left|right|bottom|inset(-[xy])?|translate-[xy]|rotate|tracking)-/.test(tok)) return false;
+    if (neg && !/^(top|left|right|bottom|inset(-[xy])?|translate-[xy]|rotate|tracking|m[xytrblse]?|skew|scale)-/.test(tok)) return false;
 
     // arbitrary property: [prop:value]
     if ((m = /^\[([a-z-]+):(.+)\]$/.exec(tok))) return arbitraryProperty(m[1], m[2].replace(/_/g, ' '));
@@ -179,11 +230,132 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
       case 'underline': style.textDecoration = 'underline'; return true;
       case 'line-through': style.textDecoration = 'line-through'; return true;
       case 'no-underline': style.textDecoration = 'none'; return true;
-      case 'border': borderWidth = 1; return true;
+      case 'border': setBorder('', 1, null); return true;
       case 'rounded': corners.fill(RADII.DEFAULT); radiusSet = true; return true;
       case 'shadow': return applyShadow('DEFAULT');
+      case 'shadow-inner': style.shadows = [{ x: 0, y: 2, blur: 4, spread: 0, color: { r: 0, g: 0, b: 0, a: 0.05 }, inset: true }]; return true;
+      case 'truncate': style.maxLines = 1; if (style.width === undefined) style.widthSizing ??= 'FILL'; return true;
+      case 'text-ellipsis': style.maxLines ??= 1; return true;
+      case 'line-clamp-none': delete style.maxLines; return true;
+      case 'border-dashed': case 'border-dotted': borderStyle = tok.slice(7) as 'dashed' | 'dotted'; return true;
+      case 'border-solid': borderStyle = 'solid'; return true;
+      case 'border-none': setBorder('', 0, null); return true;
+      case 'bg-radial': gradType = 'radial'; return true;
+      case 'bg-conic': gradType = 'conic'; return true;
+      case 'aspect-auto': delete style.aspectRatio; return true;
+      case 'max-h-none': delete style.maxHeight; return true;
     }
     if (IGNORED.test(tok)) return true;
+
+    // margin
+    if ((m = /^m([xytrblse])?-(.+)$/.exec(tok))) {
+      const sides = SIDE_INDEX[{ s: 'l', e: 'r' }[m[1] ?? ''] ?? m[1] ?? ''];
+      const v = m[2] === 'auto' ? 'auto' as const : num(m[2]);
+      if (v === null) return false;
+      for (const i of sides) margin[i] = v;
+      return true;
+    }
+    if ((m = /^space-([xy])-(.+)$/.exec(tok))) {
+      const n = num(m[2]);
+      if (n === null) return false;
+      (style.space ??= {})[m[1] as 'x' | 'y'] = n;
+      return true;
+    }
+    if ((m = /^divide-([xy])(?:-(.+))?$/.exec(tok))) {
+      const n = m[2] === undefined ? 1 : /^(0|2|4|8)$/.test(m[2]) ? Number(m[2]) : arbLength(m[2]);
+      if (n === null) return false;
+      (style.divide ??= {})[m[1] as 'x' | 'y'] = n;
+      return true;
+    }
+    if ((m = /^divide-(dashed|dotted)$/.exec(tok))) { (style.divide ??= {}).style = m[1] as 'dashed' | 'dotted'; return true; }
+    if ((m = /^divide-(.+)$/.exec(tok))) {
+      const c = colorValue(m[1]);
+      if (!c) return false;
+      (style.divide ??= {}).color = c; return true;
+    }
+    if ((m = /^inset-shadow-(.+)$/.exec(tok))) {
+      if (m[1] in INSET_SHADOWS) {
+        const list = INSET_SHADOWS[m[1]];
+        const outer = (style.shadows ?? []).filter((sh) => !sh.inset);
+        style.shadows = list ? [...outer, ...list.map((sh) => ({ ...sh, color: { ...sh.color } }))] : outer;
+        return true;
+      }
+      const c = colorValue(m[1]);
+      if (!c || !style.shadows?.some((sh) => sh.inset)) return false;
+      for (const sh of style.shadows) if (sh.inset) sh.color = c;
+      return true;
+    }
+    if ((m = /^text-shadow(?:-(.+))?$/.exec(tok))) {
+      const k = m[1] ?? 'md';
+      if (k in TEXT_SHADOWS) { const l = TEXT_SHADOWS[k]; if (l) style.textShadows = l.map((sh) => ({ ...sh, color: { ...sh.color } })); else delete style.textShadows; return true; }
+      if (/^\[.+\]$/.test(k)) {
+        const { shadows, bad } = parseShadows(k.slice(1, -1).replace(/_/g, ' '), true);
+        if (bad || !shadows.length) return false;
+        style.textShadows = shadows; return true;
+      }
+      const c = colorValue(k);
+      if (!c || !style.textShadows) return false;
+      for (const sh of style.textShadows) sh.color = c;
+      return true;
+    }
+    if ((m = /^mix-blend-(.+)$/.exec(tok))) {
+      if (m[1] === 'normal') { delete style.blendMode; return true; }
+      const b = parseBlendMode(m[1]);
+      if (!b) return false;
+      style.blendMode = b; return true;
+    }
+    if ((m = /^scale(?:-([xy]))?-(\d+|\[(\d*\.?\d+)(%?)\])$/.exec(tok))) {
+      const n = (m[3] !== undefined ? parseFloat(m[3]) / (m[4] ? 100 : 1) : Number(m[2]) / 100) * (neg ? -1 : 1);
+      if (m[1] !== 'y') tf.sx = n;
+      if (m[1] !== 'x') tf.sy = n;
+      return true;
+    }
+    if ((m = /^(skew|rotate)-([xy])-(\d*\.?\d+|\[(-?\d*\.?\d+)deg\])$/.exec(tok))) {
+      const n = (m[4] !== undefined ? parseFloat(m[4]) : parseFloat(m[3])) * (neg ? -1 : 1);
+      tf[(m[1] === 'skew' ? 'sk' : 'r') + m[2] as 'skx' | 'sky' | 'rx' | 'ry'] = n;
+      return true;
+    }
+    if ((m = /^(brightness|contrast|saturate)-(\d+|\[(.+)\])$/.exec(tok))) {
+      return addImageFilter(adjust, m[1], m[3] ?? String(Number(m[2]) / 100));
+    }
+    if ((m = /^grayscale(?:-(\d+|\[(.+)\]))?$/.exec(tok))) {
+      return addImageFilter(adjust, 'grayscale', m[2] ?? (m[1] === undefined ? '1' : String(Number(m[1]) / 100)));
+    }
+    if (tok === 'bg-repeat' || tok === 'bg-repeat-x' || tok === 'bg-repeat-y' || tok === 'bg-repeat-round' || tok === 'bg-repeat-space') { fit.repeat = true; return true; }
+    if (tok === 'bg-no-repeat') { fit.repeat = false; return true; }
+    if ((m = /^bg-\[url\((.+)\)\]$/.exec(tok))) { style.imageUrl = m[1].replace(/^['"]|['"]$/g, ''); return true; }
+    if ((m = /^line-clamp-(\d+)$/.exec(tok))) { style.maxLines = Number(m[1]); return true; }
+    if ((m = /^aspect-(.+)$/.exec(tok))) {
+      const v = m[1] in ASPECTS ? ASPECTS[m[1]] : parseAspectRatio((/^\[.+\]$/.test(m[1]) ? m[1].slice(1, -1) : m[1]).replace(/_/g, ' '));
+      if (!v) return false;
+      style.aspectRatio = v; return true;
+    }
+    if ((m = /^max-h-(.+)$/.exec(tok))) {
+      const n = m[1] === 'screen' ? 900 : length(m[1]);
+      if (n === null) return false;
+      style.maxHeight = n; return true;
+    }
+    // images: background-size/position, object-fit/position
+    if ((m = /^(?:bg|object)-(cover|contain)$/.exec(tok))) { fit.size = m[1] as 'cover' | 'contain'; return true; }
+    if (tok === 'object-fill') { fit.stretch = true; return true; }
+    if (tok === 'object-none') { fit.size = { w: 'auto', h: 'auto' }; return true; }
+    if (tok === 'object-scale-down') { fit.size = 'contain'; return true; }
+    if (tok === 'bg-auto') { fit.size = { w: 'auto', h: 'auto' }; return true; }
+    if ((m = new RegExp(`^(?:bg|object)-(${POSITIONS})$`).exec(tok))) {
+      fit.position = parsePosition(m[1].replace('-', ' '))!; return true;
+    }
+    if ((m = /^(?:bg-size|bg-\[length):?-?\[?(.+?)\]?$/.exec(tok)) && /^bg-(size-|\[length:)/.test(tok)) {
+      const size = parseImageSize(m[1].replace(/^\[|\]$/g, '').replace(/_/g, ' '));
+      if (!size) return false;
+      fit.size = size; return true;
+    }
+    if ((m = /^(?:bg-position-|object-)\[(.+)\]$/.exec(tok)) || (m = /^bg-\[position:(.+)\]$/.exec(tok))) {
+      const pos = parsePosition(m[1].replace(/_/g, ' '));
+      if (!pos) return false;
+      fit.position = pos; return true;
+    }
+    if ((m = /^bg-radial-\[(.+)\]$/.exec(tok))) { gradType = 'radial'; gradAt = m[1].replace(/_/g, ' '); return true; }
+    if ((m = /^bg-conic-(\d+)$/.exec(tok))) { gradType = 'conic'; gradAngle = Number(m[1]); return true; }
 
     // gap
     if ((m = /^gap(-x|-y)?-(.+)$/.exec(tok))) {
@@ -203,7 +375,7 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
       for (const s of sides[m[1] ?? '']) pad[s] = n;
       return true;
     }
-    if ((m = /^justify-(start|center|end|between)$/.exec(tok))) { style.justify = m[1] as NormalizedStyle['justify']; return true; }
+    if ((m = /^justify-(start|center|end|between|around|evenly)$/.exec(tok))) { style.justify = m[1] as NormalizedStyle['justify']; return true; }
     if ((m = /^items-(start|center|end|stretch|baseline)$/.exec(tok))) { style.align = m[1] as NormalizedStyle['align']; return true; }
 
     // sizing
@@ -305,8 +477,8 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
     if ((m = /^filter-\[(.+)\]$/.exec(tok))) return arbitraryProperty('filter', m[1].replace(/_/g, ' '));
 
     // rotation
-    if ((m = /^rotate-(\d*\.?\d+)$/.exec(tok))) { style.rotation = (neg ? -1 : 1) * parseFloat(m[1]); return true; }
-    if ((m = /^rotate-\[(-?\d*\.?\d+)deg\]$/.exec(tok))) { style.rotation = (neg ? -1 : 1) * parseFloat(m[1]); return true; }
+    if ((m = /^rotate-(\d*\.?\d+)$/.exec(tok))) { tf.rot = (neg ? -1 : 1) * parseFloat(m[1]); return true; }
+    if ((m = /^rotate-\[(-?\d*\.?\d+)deg\]$/.exec(tok))) { tf.rot = (neg ? -1 : 1) * parseFloat(m[1]); return true; }
 
     // gradients (v3 bg-gradient-to-*, v4 bg-linear-*)
     if ((m = /^bg-(?:gradient|linear)-to-(t|tr|r|br|b|bl|l|tl)$/.exec(tok))) { gradAngle = GRADIENT_DIRS[m[1]]; return true; }
@@ -318,7 +490,7 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
       return true;
     }
     if ((m = /^bg-\[(.*gradient\(.*)\]$/.exec(tok))) {
-      const g = parseLinearGradient(m[1].replace(/_/g, ' '));
+      const g = parseGradient(m[1].replace(/_/g, ' '));
       if (!g) return false;
       style.gradient = g; return true;
     }
@@ -334,13 +506,23 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
     }
 
     // border
-    if ((m = /^border-(0|2|4|8)$/.exec(tok))) { borderWidth = Number(m[1]); return true; }
-    if ((m = /^border-(.+)$/.exec(tok))) {
-      const w = arbLength(m[1]);
-      if (w !== null) { borderWidth = w; return true; }
-      const c = colorValue(m[1]);
+    if ((m = /^border-([trblxy])$/.exec(tok))) { setBorder(m[1], 1, null); return true; }
+    if ((m = /^border(?:-([trblxy]))?-(.+)$/.exec(tok))) {
+      const side = m[1] ?? '';
+      const w = /^(0|2|4|8)$/.test(m[2]) ? Number(m[2]) : arbLength(m[2]);
+      if (w !== null) { setBorder(side, w, null); return true; }
+      const c = colorValue(m[2]);
       if (!c) return false;
-      borderColor = c; return true;
+      setBorder(side, null, c, curTok); return true;
+    }
+
+    // blur
+    if ((m = /^(backdrop-)?blur(?:-(.+))?$/.exec(tok))) {
+      const v = m[2] ?? 'DEFAULT';
+      const n = v in BLURS ? BLURS[v] : arbLength(v);
+      if (n === null) return false;
+      if (m[1]) style.backdropBlur = n; else style.blur = n;
+      return true;
     }
 
     // text-*
@@ -416,15 +598,17 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
 
   function arbitraryProperty(prop: string, value: string): boolean {
     const camel = prop.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
-    if (camel === 'borderWidth') {
-      const n = arbLength(`[${value}]`);
-      if (n === null) return false;
-      borderWidth = n; return true;
-    }
-    if (camel === 'borderColor') {
+    const side = /^border(Top|Right|Bottom|Left)?(Width|Color)$/.exec(camel);
+    if (side) {
+      const key = side[1] ? side[1][0].toLowerCase() : '';
+      if (side[2] === 'Width') {
+        const n = arbLength(`[${value}]`);
+        if (n === null) return false;
+        setBorder(key, n, null); return true;
+      }
       const c = parseCssColor(value);
       if (!c) return false;
-      borderColor = c; return true;
+      setBorder(key, null, c, curTok); return true;
     }
     const r = inlineToStyle({ [camel]: value });
     if (r.unsupported.length) return false;
@@ -460,8 +644,11 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
   if (radiusSet) {
     style.radius = corners.every((c) => c === corners[0]) ? corners[0] : [...corners];
   }
-  if (borderWidth !== undefined && borderWidth > 0) {
-    style.border = { width: borderWidth, color: borderColor ?? DEFAULT_BORDER_COLOR };
+  if (borderW.some((w) => w !== undefined)) {
+    const { border, mixed } = resolveBorder(borderW, borderC, DEFAULT_BORDER_COLOR);
+    if (border) style.border = border;
+    if (border && borderStyle && borderStyle !== 'solid') border.style = borderStyle;
+    for (const i of mixed) if (borderCTok[i] && !unsupported.includes(borderCTok[i]!)) unsupported.push(borderCTok[i]!);
   }
   const fs = style.fontSize ?? 16;
   if (leading) style.lineHeight = 'mult' in leading ? leading.mult * fs : leading.px;
@@ -475,7 +662,29 @@ export function tailwindToStyle(className: string): { style: NormalizedStyle; un
     const stops = [{ position: 0, color: from }];
     if (gradVia) stops.push({ position: 0.5, color: gradVia });
     stops.push({ position: 1, color: to });
-    style.gradient = { angle: gradAngle ?? 180, stops };
+    if (gradType) {
+      // Reuse the CSS parser for the shape/position part (`bg-radial-[circle_at_50%_0%]`).
+      const head = gradType === 'conic' ? `from ${gradAngle ?? 0}deg${gradAt ? ' at ' + gradAt : ''}` : gradAt ?? '';
+      const g = parseGradient(`${gradType}-gradient(${head ? head + ', ' : ''}red, blue)`);
+      if (g) style.gradient = { ...g, stops };
+      else unsupported.push(`bg-${gradType}-[${gradAt}]`);
+    } else style.gradient = { angle: gradAngle ?? 180, stops };
+  }
+  if (margin.some((v) => v !== undefined)) {
+    const n = (v: number | 'auto' | undefined) => (typeof v === 'number' ? v : 0);
+    style.margin = { top: n(margin[0]), right: n(margin[1]), bottom: n(margin[2]), left: n(margin[3]) };
+    if (margin[1] === 'auto' && margin[3] === 'auto') style.margin.autoX = true;
+  }
+  if (fit.size || fit.position || fit.stretch || fit.repeat) style.imageFit = fit;
+  if (Object.keys(adjust).length) style.imageFilters = adjust;
+  if (Object.keys(tf).length) {
+    let mat = IDENTITY;
+    if (tf.rot) mat = mulMat(mat, rotateMat(tf.rot));
+    if (tf.rx) mat = mulMat(mat, scaleMat(1, Math.cos((tf.rx * Math.PI) / 180)));
+    if (tf.ry) mat = mulMat(mat, scaleMat(Math.cos((tf.ry * Math.PI) / 180), 1));
+    if (tf.skx || tf.sky) mat = mulMat(mat, skewMat(tf.skx ?? 0, tf.sky ?? 0));
+    mat = mulMat(mat, scaleMat(tf.sx ?? 1, tf.sy ?? 1));
+    setMatrix(style, mat);
   }
 
   return { style, unsupported };

@@ -9,7 +9,7 @@ type Dir = 'row' | 'column';
 
 const TEXT_KEYS = [
   'color', 'fontFamily', 'fontFallbacks', 'fontSize', 'fontWeight', 'fontStyle',
-  'lineHeight', 'letterSpacing', 'textAlign', 'textTransform', 'textGradient',
+  'lineHeight', 'letterSpacing', 'textAlign', 'textTransform', 'textGradient', 'textShadows', 'maxLines',
 ] as const;
 
 /** Phrasing elements that can flow inside a single text layer. */
@@ -266,6 +266,24 @@ type Part = { t: 'text'; text: string } | { t: 'node'; node: IRNode };
 const hasBox = (s: NormalizedStyle): boolean =>
   !!(s.background || s.gradient || s.imageUrl || s.padding || s.border || s.radius !== undefined || (s.shadows && s.shadows.length));
 
+const DIVIDE_COLOR = { r: 0xe5 / 255, g: 0xe7 / 255, b: 0xeb / 255, a: 1 };
+
+/** How a box sits in its parent: these move to a wrapper frame so the wrapper takes the box's place. */
+const LAYOUT_KEYS = ['gridItem', 'alignSelf', 'inline'] as const;
+function pickLayout(s: NormalizedStyle): NormalizedStyle {
+  const out: NormalizedStyle = {};
+  for (const k of LAYOUT_KEYS) if (s[k] !== undefined) (out as Record<string, unknown>)[k] = s[k];
+  // A box that fills its parent on an axis makes the wrapper fill it; the box then fills the wrapper.
+  if (s.widthSizing === 'FILL') out.widthSizing = 'FILL';
+  if (s.heightSizing === 'FILL') out.heightSizing = 'FILL';
+  return out;
+}
+function dropLayout(s: NormalizedStyle): NormalizedStyle {
+  const out = { ...s };
+  for (const k of LAYOUT_KEYS) delete out[k];
+  return out;
+}
+
 function pickText(s: NormalizedStyle): NormalizedStyle {
   const out: Record<string, unknown> = {};
   for (const k of TEXT_KEYS) if (s[k] !== undefined) out[k] = s[k];
@@ -365,7 +383,7 @@ class Converter {
     const style: NormalizedStyle = { ...tw.style, ...inl.style };
     // `background-clip: text` paints the gradient through the glyphs, so it belongs to the text.
     if (style.clipText) {
-      if (style.gradient) { style.textGradient = style.gradient; delete style.gradient; }
+      if (style.gradient) { style.textGradient = style.gradient; delete style.gradient; delete style.layers; }
       delete style.clipText;
     }
     if (inlineGrow) { style.widthSizing = 'FILL'; grow = true; }
@@ -418,6 +436,109 @@ class Converter {
   }
 
   convertElement(
+    el: N, parentDir: Dir | undefined, inherited: NormalizedStyle, rootName?: string, isRoot = false,
+  ): IRNode | null {
+    const n = this.convertElementBody(el, parentDir, inherited, rootName, isRoot);
+    if (!n) return null;
+    if (n.kind === 'frame') this.applyChildSpacing(n);
+    if (isRoot) { delete n.style.margin; return n; } // nothing to be spaced from
+    return this.applyMargin(n, parentDir);
+  }
+
+  /** space-x/y become the gap; divide-x/y become a border on every child after the first. */
+  applyChildSpacing(n: Extract<IRNode, { kind: 'frame' }>) {
+    this.applyJustify(n);
+    const { space, divide, direction } = n.style;
+    const axis = direction === 'row' ? 'x' : 'y';
+    if (space) {
+      if (space[axis] !== undefined && n.style.gap === undefined) n.style.gap = space[axis];
+      delete n.style.space;
+    }
+    if (divide) {
+      const w = divide[axis];
+      if (w) {
+        const color = divide.color ?? DIVIDE_COLOR;
+        n.children = n.children.map((c, i) => {
+          if (i === 0 || c.style.position === 'absolute') return c;
+          // A text layer can't have a border, so it gets a frame to carry it.
+          const box: IRNode = c.kind === 'frame' ? c
+            : { kind: 'frame', name: c.name, tag: 'div', style: { direction: 'column', ...pickLayout(c.style) }, children: [{ ...c, style: dropLayout(c.style) }] };
+          const old = box.style.border;
+          const sides: [number, number, number, number] = old ? [...(old.sides ?? [old.width, old.width, old.width, old.width])] : [0, 0, 0, 0];
+          sides[axis === 'y' ? 0 : 3] = w;
+          box.style.border = { width: Math.max(...sides), color: old?.color ?? color, sides };
+          if (divide.style) box.style.border.style = divide.style;
+          return box;
+        });
+      }
+      delete n.style.divide;
+    }
+  }
+
+  /**
+   * Figma can only space items "between", so around/evenly get zero-size spacers: with space-between,
+   * `S a b S` leaves equal space everywhere (evenly) and `S a S b S` leaves half-size ends (around).
+   */
+  applyJustify(n: Extract<IRNode, { kind: 'frame' }>) {
+    const j = n.style.justify;
+    if (j !== 'around' && j !== 'evenly') return;
+    const flow = n.children.filter((c) => c.style.position !== 'absolute' && c.style.display !== 'none');
+    if (flow.length <= 1) { n.style.justify = 'center'; return; }
+    if (n.style.display === 'grid' || n.style.wrap) {
+      n.style.justify = 'between';
+      this.warn(`justify-${j} on "${n.name}" drawn as space-between (it wraps)`);
+      return;
+    }
+    const spacer = (): IRNode => ({
+      kind: 'frame', name: 'spacer', tag: 'spacer',
+      style: { width: 0, height: 0, widthSizing: 'FIXED', heightSizing: 'FIXED' }, children: [],
+    });
+    const out: IRNode[] = [];
+    let seen = 0;
+    for (const c of n.children) {
+      const inFlow = flow.includes(c);
+      if (inFlow && (seen === 0 || j === 'around')) out.push(spacer());
+      out.push(c);
+      if (inFlow) seen++;
+    }
+    out.push(spacer());
+    n.children = out;
+    n.style.justify = 'between';
+  }
+
+  /**
+   * Figma has no margins. An absolutely positioned box just moves; anything else is wrapped in a frame whose
+   * padding is the margin (`mx-auto` centres it in a full-width wrapper). Negative margins can't be expressed.
+   */
+  applyMargin(n: IRNode, parentDir: Dir | undefined): IRNode {
+    const m = n.style.margin;
+    if (!m) return n;
+    delete n.style.margin;
+    if (n.style.position === 'absolute') {
+      if (n.style.left !== undefined) n.style.left += m.left; else if (n.style.right !== undefined) n.style.right += m.right;
+      if (n.style.top !== undefined) n.style.top += m.top; else if (n.style.bottom !== undefined) n.style.bottom += m.bottom;
+      return n;
+    }
+    if ([m.top, m.right, m.bottom, m.left].some((v) => v < 0)) this.warn(`Negative margin on "${n.name}" ignored`);
+    const pad = { top: Math.max(0, m.top), right: Math.max(0, m.right), bottom: Math.max(0, m.bottom), left: Math.max(0, m.left) };
+    const centre = !!m.autoX && parentDir !== 'row';
+    if (!centre && !pad.top && !pad.right && !pad.bottom && !pad.left) return n;
+    const style: NormalizedStyle = { direction: 'column', padding: pad, ...pickLayout(n.style) };
+    if (centre) { style.align = 'center'; style.widthSizing = 'FILL'; delete style.inline; }
+    // Percent sizes are of the parent, so they size the wrapper (plus the margin) and the box fills it.
+    const inner = dropLayout(n.style);
+    if (inner.widthPct) {
+      style.widthPct = { pct: inner.widthPct.pct, px: inner.widthPct.px + pad.left + pad.right };
+      delete inner.widthPct; inner.widthSizing = 'FILL';
+    }
+    if (inner.heightPct) {
+      style.heightPct = { pct: inner.heightPct.pct, px: inner.heightPct.px + pad.top + pad.bottom };
+      delete inner.heightPct; inner.heightSizing = 'FILL';
+    }
+    return { kind: 'frame', name: n.name, tag: 'margin', style, children: [{ ...n, style: inner }] } as IRNode;
+  }
+
+  convertElementBody(
     el: N, parentDir: Dir | undefined, inherited: NormalizedStyle, rootName?: string, isRoot = false,
   ): IRNode | null {
     const tag = tagName(el.openingElement.name);
@@ -534,7 +655,7 @@ class Converter {
       const { style } = this.readStyle(el);
       if (style.display === 'none') return true;
       if (hasBox(style) || style.display || style.direction || style.width !== undefined ||
-          style.height !== undefined || style.position === 'absolute') return false;
+          style.height !== undefined || style.position === 'absolute' || style.margin) return false;
       const spanStyle = { ...cur, ...INLINE_DEFAULTS[tag], ...pickSpanText(style) };
       // Reserve the slot first so outer spans are applied before nested ones.
       const span: TextSpan = { start: text.length, end: text.length, style: spanStyle };

@@ -1,4 +1,5 @@
 import { convert } from './parse';
+import { CHECKS_COMMAND, checksReport, testImage } from './checksUi';
 import type { ConvertResult, IRNode, ToUI } from './types';
 
 const KEY = 'paste-to-layers:last';
@@ -83,6 +84,11 @@ function validate() {
   if (!src) {
     setStatus('idle', '');
     showWarnings([]);
+  } else if (src === CHECKS_COMMAND) {
+    setStatus('idle', 'Press Create layers to run the built-in checks (about 15 seconds)');
+    showWarnings([]);
+    btn.disabled = busy;
+    return;
   } else {
     try {
       result = convert(src);
@@ -135,8 +141,19 @@ statusEl.addEventListener('click', () => {
   code.setSelectionRange(off, off);
 });
 
+let checkImage: Uint8Array | null = null;
+
+async function runChecks() {
+  busy = true;
+  btn.disabled = true;
+  setStatus('busy', 'Running checks…');
+  checkImage = await testImage();
+  parent.postMessage({ pluginMessage: { type: 'checks', image: checkImage } }, '*');
+}
+
 function run() {
   if (busy) return;
+  if (code.value.trim() === CHECKS_COMMAND) { void runChecks(); return; }
   validate();
   if (!result) {
     if (!code.value.trim()) setStatus('error', 'Paste a component first.');
@@ -163,6 +180,17 @@ window.onmessage = (ev: MessageEvent) => {
   if (!msg) return;
   busy = false;
   btn.disabled = !result;
+  if (msg.type === 'checks') {
+    setStatus('busy', 'Comparing with the browser…');
+    checksReport(msg.results, checkImage!).then((report) => {
+      code.value = report;
+      editor.classList.add('has-code');
+      code.select();
+      setStatus('ok', 'Checks done. The report is selected above; copy it.');
+      showWarnings([]);
+    }, (e) => setStatus('error', 'Checks failed: ' + String(e)));
+    return;
+  }
   if (msg.type === 'done') {
     setStatus('ok', `Added ${plural(msg.nodeCount, 'layer')} to the canvas`);
     const all = [...(result?.warnings ?? []), ...(msg.warnings ?? [])];

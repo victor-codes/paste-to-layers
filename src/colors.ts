@@ -52,6 +52,20 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   return [f(0), f(8), f(4)];
 }
 
+/** OKLab → sRGB (0..1, clamped to gamut). */
+function oklabToRgb(L: number, a: number, b: number): [number, number, number] {
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  const lin = [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  const gamma = (c: number) => (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055);
+  return lin.map((c) => clamp01(gamma(c))) as [number, number, number];
+}
+
 export function parseCssColor(s: string): RGBA | null {
   const str = s.trim().toLowerCase();
   if (!str || str === 'currentcolor') return null;
@@ -75,6 +89,21 @@ export function parseCssColor(s: string): RGBA | null {
     const lig = parseNum(parts[2], 1);
     if (isNaN(h) || sat === null || lig === null) return null;
     const [r, g, b] = hslToRgb(h, clamp01(sat > 1 ? sat / 100 : sat), clamp01(lig > 1 ? lig / 100 : lig));
+    return { r, g, b, a: alpha };
+  }
+  const ok = str.match(/^(oklch|oklab)\(\s*(.+?)\s*\)$/);
+  if (ok) {
+    const parts = ok[2].split(/\s*\/\s*|\s+/).filter(Boolean);
+    if (parts.length < 3 || parts.length > 4) return null;
+    const alpha = parseAlpha(parts[3]);
+    // L is 0..1 or a percentage; chroma/a/b percentages are of 0.4.
+    const num = (p: string, pctOf: number) => (p === 'none' ? 0 : p.endsWith('%') ? (parseFloat(p) / 100) * pctOf : parseFloat(p));
+    const L = num(parts[0], 1);
+    const x = num(parts[1], 0.4);
+    const y = ok[1] === 'oklch' ? parseFloat(parts[2]) || 0 : num(parts[2], 0.4);
+    if (alpha === null || [L, x, y].some((v) => Number.isNaN(v))) return null;
+    const [A, B] = ok[1] === 'oklch' ? [x * Math.cos((y * Math.PI) / 180), x * Math.sin((y * Math.PI) / 180)] : [x, y];
+    const [r, g, b] = oklabToRgb(L, A, B);
     return { r, g, b, a: alpha };
   }
   const named = NAMED[str];

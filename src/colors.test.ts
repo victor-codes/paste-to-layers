@@ -42,3 +42,14 @@ describe('withAlpha', () => {
     expect(withAlpha({ r: 1, g: 0, b: 0, a: 1 }, 0.3)).toEqual({ r: 1, g: 0, b: 0, a: 0.3 });
   });
 });
+
+describe('oklch / oklab', () => {
+  it('matches known sRGB values', () => {
+    const red = parseCssColor('oklch(62.8% 0.2577 29.23)')!; // #ff0000
+    expect(red.r).toBeCloseTo(1, 2);
+    expect(red.g).toBeCloseTo(0, 2);
+    expect(red.b).toBeCloseTo(0, 2);
+    const white = parseCssColor('oklab(1 0 0 / 50%)')!;
+    expect([white.r, white.g, white.b, white.a].map((v) => +v.toFixed(3))).toEqual([1, 1, 1, 0.5]);
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { closestStyle, fitExtent, parseStyleName, placeGridItems } from './render';
+import { closestStyle, fitExtent, gradientPaint, imageAdjustments, imageBox, parseStyleName, placeGridItems, radialRadii } from './render';
 
 describe('font style names', () => {
   it('reads weights regardless of spacing', () => {
@@ -59,5 +59,42 @@ describe('grid placement', () => {
     const { cells } = placeGridItems([{ colStart: 3, colSpan: 9 }, { colSpan: -1 }], 4);
     expect(cells[0]).toEqual({ row: 0, col: 2, rowSpan: 1, colSpan: 2 });
     expect(cells[1]).toEqual({ row: 1, col: 0, rowSpan: 1, colSpan: 4 });
+  });
+});
+
+describe('image placement', () => {
+  it('sizes and positions like background-size / position', () => {
+    // 200×100 box, 400×400 image at 132.73% × 100%, centred horizontally, top.
+    const b = imageBox({ size: { w: { pct: 1.3273, px: 0 }, h: { pct: 1, px: 0 } }, position: { x: { pct: 0.5, px: 0 }, y: { pct: 0, px: 0 } } }, 200, 100, 400, 400);
+    expect(b.w).toBeCloseTo(265.46);
+    expect(b.h).toBe(100);
+    expect(b.x).toBeCloseTo(-32.73);
+    expect(b.y).toBe(0);
+  });
+  it('contains and keeps aspect for auto sides', () => {
+    expect(imageBox({ size: 'contain' }, 200, 100, 400, 400)).toEqual({ x: 50, y: 0, w: 100, h: 100 });
+    expect(imageBox({ size: { w: { pct: 0, px: 50 }, h: 'auto' } }, 200, 100, 400, 200)).toEqual({ x: 0, y: 0, w: 50, h: 25 });
+  });
+});
+
+describe('gradients', () => {
+  it('computes CSS radial sizes', () => {
+    expect(radialRadii({ type: 'radial', angle: 0, stops: [], cx: 0.5, cy: 0.5, circle: true, extent: 'closest-side' }, 200, 100)).toEqual({ rx: 50, ry: 50 });
+    const e = radialRadii({ type: 'radial', angle: 0, stops: [], cx: 0, cy: 0 }, 200, 100);
+    expect(e.rx).toBeCloseTo(200 * Math.SQRT2);
+    expect(e.ry).toBeCloseTo(100 * Math.SQRT2);
+  });
+  it('maps the radial centre to the gradient centre', () => {
+    const p = gradientPaint({ type: 'radial', angle: 0, stops: [], cx: 0.25, cy: 0.5, circle: true, extent: { x: { pct: 0, px: 50 }, y: { pct: 0, px: 50 } } }, 200, 100);
+    const [[a, , c], [, e, f]] = p.gradientTransform;
+    expect(a * 0.25 + c).toBeCloseTo(0.5);
+    expect(e * 0.5 + f).toBeCloseTo(0.5);
+    expect(a * (0.25 + 50 / 200) + c).toBeCloseTo(1); // 50px to the right is the edge
+  });
+});
+
+describe('image adjustments', () => {
+  it('maps CSS amounts onto Figma\'s -1..1 range', () => {
+    expect(imageAdjustments({ saturate: 0, brightness: 1.25, contrast: 3 })).toEqual({ saturation: -0.83, exposure: 0.08, contrast: 1 });
   });
 });

@@ -192,3 +192,95 @@ describe('Paper page sections', () => {
     expect(f.style.shadows?.map((s) => s.y)).toEqual([10, 4]);
   });
 });
+
+describe('per-side borders and blur', () => {
+  it('keeps side widths and drops transparent sides', () => {
+    const { style, unsupported } = tw('border-t border-t-solid border-t-[#FFFFFF0F] border-b border-b-solid border-b-[#00000000] border-r-2');
+    expect(unsupported).toEqual([]);
+    expect(style.border?.sides).toEqual([1, 2, 0, 0]);
+    expect(style.border?.width).toBe(2);
+    expect(style.border?.color.a).toBeCloseTo(0x0f / 255);
+  });
+  it('treats near-identical side colors as one and reports a clearly different one', () => {
+    expect(tw('border-t border-b border-t-[#FFFFFF14] border-b-[#FFFFFF12]').unsupported).toEqual([]);
+    const mixed = tw('border-y border-t-[#161A0F29] border-b-[#ECF1E32E]');
+    expect(mixed.unsupported).toEqual(['border-b-[#ECF1E32E]']);
+  });
+  it('keeps uniform borders simple', () => {
+    expect(tw('border border-red-500').style.border?.sides).toBeUndefined();
+    expect(tw('border-x-[3px]').style.border?.sides).toEqual([0, 3, 0, 3]);
+  });
+  it('reads blur and backdrop blur in classes and arbitrary properties', () => {
+    const { style, unsupported } = tw('filter-[blur(10px)] [backdrop-filter:blur(7px)] bg-origin-border');
+    expect(unsupported).toEqual([]);
+    expect(style.blur).toBe(10);
+    expect(style.backdropBlur).toBe(7);
+    expect(tw('backdrop-blur-md').style.backdropBlur).toBe(12);
+    expect(tw('blur-[3px]').style.blur).toBe(3);
+  });
+});
+
+describe('spacing, effects and images', () => {
+  it('reads margins including auto and negative', () => {
+    const { style, unsupported } = tw('mx-auto mt-4 -mb-2 ms-[10px]');
+    expect(unsupported).toEqual([]);
+    expect(style.margin).toEqual({ top: 16, right: 0, bottom: -8, left: 10 });
+    expect(tw('mx-auto').style.margin?.autoX).toBe(true);
+  });
+  it('reads space, divide, max-h, aspect and fractional sizes', () => {
+    const { style, unsupported } = tw('space-y-4 divide-y divide-gray-200 divide-dashed max-h-96 aspect-video w-1/2 h-[calc(100%-20px)]');
+    expect(unsupported).toEqual([]);
+    expect(style.space).toEqual({ y: 16 });
+    expect(style.divide?.y).toBe(1);
+    expect(style.divide?.style).toBe('dashed');
+    expect(style.maxHeight).toBe(384);
+    expect(style.aspectRatio).toBeCloseTo(16 / 9);
+    expect(style.widthPct).toEqual({ pct: 0.5, px: 0 });
+    expect(style.heightPct).toEqual({ pct: 1, px: -20 });
+    expect(tw('aspect-[4/3]').style.aspectRatio).toBeCloseTo(4 / 3);
+  });
+  it('reads inset and text shadows, blend modes, scale and clamping', () => {
+    const { style, unsupported } = tw('shadow-md inset-shadow-sm text-shadow-lg mix-blend-multiply scale-110 line-clamp-2 border border-dotted');
+    expect(unsupported).toEqual([]);
+    expect(style.shadows?.map((s) => !!s.inset)).toEqual([false, true]);
+    expect(style.textShadows).toHaveLength(3);
+    expect(style.blendMode).toBe('MULTIPLY');
+    expect(style.scale).toBeCloseTo(1.1);
+    expect(style.maxLines).toBe(2);
+    expect(style.border?.style).toBe('dotted');
+    expect(tw('truncate').style.maxLines).toBe(1);
+    expect(tw('shadow-[inset_0_2px_4px_#00000020]').style.shadows?.[0].inset).toBe(true);
+  });
+  it('reads background and object sizing', () => {
+    const p = tw('bg-size-[132.73%_100%] bg-position-[50%_0%] bg-no-repeat');
+    expect(p.unsupported).toEqual([]);
+    expect(p.style.imageFit).toEqual({ size: { w: { pct: 1.3273, px: 0 }, h: { pct: 1, px: 0 } }, position: { x: { pct: 0.5, px: 0 }, y: { pct: 0, px: 0 } }, repeat: false });
+    expect(tw('object-contain object-top').style.imageFit).toEqual({ size: 'contain', position: { x: { pct: 0.5, px: 0 }, y: { pct: 0, px: 0 } } });
+    expect(tw('bg-cover bg-center').style.imageFit?.size).toBe('cover');
+  });
+  it('reads radial and conic gradients', () => {
+    const r = tw('bg-radial-[circle_at_25%_75%] from-red-500 to-blue-500');
+    expect(r.unsupported).toEqual([]);
+    expect(r.style.gradient).toMatchObject({ type: 'radial', circle: true, cx: 0.25, cy: 0.75 });
+    expect(tw('bg-conic-90 from-red-500 to-blue-500').style.gradient).toMatchObject({ type: 'conic', angle: 90 });
+    expect(tw('bg-[radial-gradient(ellipse_closest-side_at_top,#fff,#000)]').style.gradient).toMatchObject({ type: 'radial', extent: 'closest-side', cx: 0.5, cy: 0 });
+  });
+});
+
+describe('transforms, filters and tiling', () => {
+  it('composes rotate, skew and scale like Tailwind', () => {
+    const { style, unsupported } = tw('-skew-x-12 scale-x-150');
+    expect(unsupported).toEqual([]);
+    expect(style.matrix?.[0]).toBeCloseTo(1.5);
+    expect(style.matrix?.[2]).toBeCloseTo(-Math.tan((12 * Math.PI) / 180));
+    expect(tw('rotate-45 scale-110').style).toMatchObject({ rotation: 45 });
+    expect(tw('rotate-45 scale-110').style.scale).toBeCloseTo(1.1);
+  });
+  it('reads image filters, repeat and url backgrounds', () => {
+    const { style, unsupported } = tw("grayscale brightness-125 contrast-[1.1] bg-repeat bg-[url('/a.png')]");
+    expect(unsupported).toEqual([]);
+    expect(style.imageFilters).toEqual({ saturate: 0, brightness: 1.25, contrast: 1.1 });
+    expect(style.imageFit?.repeat).toBe(true);
+    expect(style.imageUrl).toBe('/a.png');
+  });
+});

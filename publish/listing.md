@@ -36,7 +36,7 @@ Fonts come from the CSS font stack. If a family isn't installed, the next one in
 Conversion runs entirely inside Figma. The only network requests are downloads of the images referenced in the code you paste.
 
 **Limitations**
-Hover, responsive and dark-mode variants, margins, runtime state and custom Tailwind themes aren't supported. Custom components (`<Button>`) become plain frames. The full list is in the README.
+Hover, responsive and dark-mode variants, runtime state and custom Tailwind themes aren't supported. Custom components (`<Button>`) become plain frames. The full list is in the README.
 
 ## Tags (5 max)
 code to design, react, tailwind, auto layout, html to figma
